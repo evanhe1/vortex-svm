@@ -39,6 +39,8 @@ public:
 
   void dcr_write(uint32_t addr, uint32_t value);
 
+  void set_core_satp(uint32_t satp);
+
   PerfStats perf_stats() const;
 
 private:

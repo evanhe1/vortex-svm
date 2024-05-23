@@ -22,6 +22,7 @@
 #include "core.h"
 #include "debug.h"
 #include "constants.h"
+#include "processor_impl.h"
 
 using namespace vortex;
 
@@ -38,6 +39,7 @@ Core::Core(const SimContext& ctx,
   , core_id_(core_id)
   , socket_(socket)
   , arch_(arch)
+  , fcsrs_(arch.num_warps(), 0)
   , emulator_(arch, dcrs, this)
   , ibuffers_(arch.num_warps(), IBUF_SIZE)
   , scoreboard_(arch_)
@@ -47,8 +49,13 @@ Core::Core(const SimContext& ctx,
   , lsu_demux_(LSU_NUM_REQS)
   , mem_coalescers_(NUM_LSU_BLOCKS)
   , pending_icache_(arch_.num_warps())
+  , csrs_(arch.num_warps())
   , commit_arbs_(ISSUE_WIDTH)
 {
+  for (uint32_t i = 0; i < arch_.num_warps(); ++i) {
+    csrs_.at(i).resize(arch.num_threads());
+  }
+  
   char sname[100];
 
   for (uint32_t i = 0; i < ISSUE_WIDTH; ++i) {
@@ -395,4 +402,50 @@ bool Core::wspawn(uint32_t num_warps, Word nextPC) {
 
 void Core::attach_ram(RAM* ram) {
   emulator_.attach_ram(ram);
+}
+
+void Core::set_csr(uint32_t addr, uint32_t value, uint32_t tid, uint32_t wid) {
+  __unused (tid);
+  switch (addr) {
+  case VX_CSR_FFLAGS:
+    fcsrs_.at(wid) = (fcsrs_.at(wid) & ~0x1F) | (value & 0x1F);
+    break;
+  case VX_CSR_FRM:
+    fcsrs_.at(wid) = (fcsrs_.at(wid) & ~0xE0) | (value << 5);
+    break;
+  case VX_CSR_FCSR:
+    fcsrs_.at(wid) = value & 0xff;
+    break;
+  case VX_CSR_SATP:
+    csrs_.at(wid).at(tid)[addr] = value;
+    mmu_.set_satp(value);
+    break;
+  case VX_CSR_MSTATUS:
+  case VX_CSR_MEDELEG:
+  case VX_CSR_MIDELEG:
+  case VX_CSR_MIE:
+  case VX_CSR_MTVEC:
+  case VX_CSR_MEPC:
+  case VX_CSR_PMPCFG0:
+  case VX_CSR_PMPADDR0:
+  case VX_CSR_MNSTATUS:
+    break;
+  default:
+  #ifdef EXT_ROP_ENABLE
+    if (addr >= VX_CSR_ROP_BEGIN
+     && addr < VX_CSR_ROP_END) {
+      csrs_.at(wid).at(tid)[addr] = value;
+    } else
+  #endif
+  #ifdef EXT_TEX_ENABLE
+    if (addr >= VX_CSR_TEX_BEGIN
+     && addr < VX_CSR_TEX_END) {
+      csrs_.at(wid).at(tid)[addr] = value;
+    } else
+  #endif
+    {
+      std::cout << std::hex << "Error: invalid CSR write addr=0x" << addr << ", value=0x" << value << std::endl;
+      std::abort();
+    }
+  }
 }

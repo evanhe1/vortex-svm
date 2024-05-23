@@ -149,6 +149,10 @@ void Cluster::barrier(uint32_t bar_id, uint32_t count, uint32_t core_id) {
     }
 }
 
+std::vector<Socket::Ptr> Cluster::get_sockets_() {
+  return sockets_;
+}
+
 Cluster::PerfStats Cluster::perf_stats() const {
   PerfStats perf_stats;
   perf_stats.l2cache = l2cache_->perf_stats();

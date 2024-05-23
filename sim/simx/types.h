@@ -54,6 +54,8 @@ typedef std::bitset<MAX_NUM_REGS>    RegMask;
 typedef std::bitset<MAX_NUM_THREADS> ThreadMask;
 typedef std::bitset<MAX_NUM_WARPS>   WarpMask;
 
+typedef std::unordered_map<uint32_t, uint32_t> CSRs;
+
 ///////////////////////////////////////////////////////////////////////////////
 
 enum class RegType {
@@ -77,6 +79,7 @@ inline std::ostream &operator<<(std::ostream &os, const RegType& type) {
 enum class FUType {
   ALU,
   LSU,
+  // CSR,
   FPU,
   SFU,
   Count
@@ -86,6 +89,7 @@ inline std::ostream &operator<<(std::ostream &os, const FUType& type) {
   switch (type) {
   case FUType::ALU: os << "ALU"; break;
   case FUType::LSU: os << "LSU"; break;
+  // case FUType::CSR: os << "CSR"; break;
   case FUType::FPU: os << "FPU"; break;
   case FUType::SFU: os << "SFU"; break;
   default: assert(false);

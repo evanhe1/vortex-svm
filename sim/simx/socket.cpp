@@ -131,6 +131,10 @@ void Socket::resume(uint32_t core_index) {
   cores_.at(core_index)->resume(-1);
 }
 
+std::vector<Core::Ptr> Socket::get_cores_() {
+  return cores_;
+}
+
 Socket::PerfStats Socket::perf_stats() const {
   PerfStats perf_stats;
   perf_stats.icache = icaches_->perf_stats();

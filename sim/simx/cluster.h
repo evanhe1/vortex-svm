@@ -63,6 +63,8 @@ public:
 
   void barrier(uint32_t bar_id, uint32_t count, uint32_t core_id);
 
+  std::vector<Socket::Ptr> get_sockets_();
+
   PerfStats perf_stats() const;
   
 private:

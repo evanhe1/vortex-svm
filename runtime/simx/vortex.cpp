@@ -36,42 +36,60 @@
 using namespace vortex;
 
 #ifndef NDEBUG
-#define DBGPRINT(format, ...) do { printf("[VXDRV] " format "", ##__VA_ARGS__); } while (0)
+#define DBGPRINT(format, ...)                        \
+    do                                               \
+    {                                                \
+        printf("[VXDRV] " format "", ##__VA_ARGS__); \
+    } while (0)
 #else
 #define DBGPRINT(format, ...) ((void)0)
 #endif
 
-#define CHECK_ERR(_expr, _cleanup)              \
-    do {                                        \
-        auto err = _expr;                       \
-        if (err == 0)                           \
-            break;                              \
+#define CHECK_ERR(_expr, _cleanup)                                      \
+    do                                                                  \
+    {                                                                   \
+        auto err = _expr;                                               \
+        if (err == 0)                                                   \
+            break;                                                      \
         printf("[VXDRV] Error: '%s' returned %d!\n", #_expr, (int)err); \
-        _cleanup                                \
+        _cleanup                                                        \
     } while (false)
+
+uint64_t bits(uint64_t addr, uint8_t s_idx, uint8_t e_idx)
+{
+    return (addr >> s_idx) & ((1 << (e_idx - s_idx + 1)) - 1);
+}
+bool bit(uint64_t addr, uint8_t idx)
+{
+    return (addr) & (1 << idx);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class vx_device {
+class vx_device
+{
 public:
     vx_device()
-        : arch_(NUM_THREADS, NUM_WARPS, NUM_CORES)
-        , ram_(0, RAM_PAGE_SIZE)
-        , processor_(arch_)
-        , global_mem_(ALLOC_BASE_ADDR, GLOBAL_MEM_SIZE - ALLOC_BASE_ADDR, RAM_PAGE_SIZE, CACHE_BLOCK_SIZE)
+        : arch_(NUM_THREADS, NUM_WARPS, NUM_CORES), ram_(0, RAM_PAGE_SIZE), processor_(arch_), global_mem_(ALLOC_BASE_ADDR, GLOBAL_MEM_SIZE - ALLOC_BASE_ADDR, RAM_PAGE_SIZE, CACHE_BLOCK_SIZE)
     {
         // attach memory module
         processor_.attach_ram(&ram_);
+
+        // Sets more
+        set_processor_satp(VM_ADDR_MODE);
     }
 
-    ~vx_device() {
-        if (future_.valid()) {
+    ~vx_device()
+    {
+        if (future_.valid())
+        {
             future_.wait();
         }
         profiling_remove(profiling_id_);
     }
 
-    int init() {
+    int init()
+    {
         CHECK_ERR(dcr_initialize(this), {
             return err;
         });
@@ -79,9 +97,11 @@ public:
         return 0;
     }
 
-    int get_caps(uint32_t caps_id, uint64_t *value) {
+    int get_caps(uint32_t caps_id, uint64_t *value)
+    {
         uint64_t _value;
-        switch (caps_id) {
+        switch (caps_id)
+        {
         case VX_CAPS_VERSION:
             _value = IMPLEMENTATION_ID;
             break;
@@ -110,7 +130,7 @@ public:
             _value = LMEM_BASE_ADDR;
             break;
         case VX_CAPS_ISA_FLAGS:
-            _value = ((uint64_t(MISA_EXT))<<32) | ((log2floor(XLEN)-4) << 30) | MISA_STD;
+            _value = ((uint64_t(MISA_EXT)) << 32) | ((log2floor(XLEN) - 4) << 30) | MISA_STD;
             break;
         default:
             std::cout << "invalid caps id: " << caps_id << std::endl;
@@ -121,20 +141,78 @@ public:
         return 0;
     }
 
-    int mem_alloc(uint64_t size, int flags, uint64_t* dev_addr) {
+    int map_local_mem(uint64_t size, uint64_t *dev_maddr)
+    {
+        bool skip = false;
+        if (*dev_maddr == STARTUP_ADDR || *dev_maddr == 0x7FFFF000)
+        {
+            skip = true;
+        }
+
+        if (get_mode() == VA_MODE::BARE)
+        {
+            return 0;
+        }
+
+        uint64_t ppn = *dev_maddr >> 12;
+        uint64_t init_pAddr = *dev_maddr;
+        uint64_t init_vAddr = *dev_maddr + 0xf0000000; // vpn will change, but we want to return the vpn of the beginning of the virtual allocation
+        init_vAddr = (init_vAddr >> 12) << 12;
+        uint64_t vpn;
+
+        // dev_maddr can be of size greater than a page, but we have to map and update
+        // page tables on a page table granularity. So divide the allocation into pages.
+        for (ppn = (*dev_maddr) >> 12; ppn < ((*dev_maddr) >> 12) + (size / RAM_PAGE_SIZE) + 1; ppn++)
+        {
+            // Currently a 1-1 mapping is used, this can be changed here to support different
+            // mapping schemes
+            vpn = skip ? ppn : ppn + 0xf0000;
+            // vpn = ppn;
+
+            // If ppn to vpn mapping doesnt exist.
+            if (addr_mapping.find(vpn) == addr_mapping.end())
+            {
+                // Create mapping.
+                update_page_table(ppn, vpn);
+                addr_mapping[vpn] = ppn;
+            }
+        }
+
+        uint64_t size_bits;
+        if (skip)
+        {
+            return 0;
+        }
+
+        *dev_maddr = init_vAddr; // commit vpn to be returned to host
+
+        return 0;
+    }
+
+    int mem_alloc(uint64_t size, int flags, uint64_t *dev_addr)
+    {
         uint64_t addr;
         CHECK_ERR(global_mem_.allocate(size, &addr), {
             return err;
         });
-        CHECK_ERR(this->mem_access(addr, size, flags), {
-            global_mem_.release(addr);
+        std::cout << "physical: " << addr << std::endl;
+        uint64_t offset = addr % RAM_PAGE_SIZE;
+        uint64_t temp_addr = addr;
+        CHECK_ERR(map_local_mem(size, &addr), {
             return err;
         });
-        *dev_addr = addr;
+        std::cout << "virtual: " << addr << std::endl;
+
+        // CHECK_ERR(this->mem_access(addr, size, flags), {
+        //     global_mem_.release(addr);
+        //     return err;
+        // });
+        *dev_addr = addr + offset;
         return 0;
     }
 
-    int mem_reserve(uint64_t dev_addr, uint64_t size, int flags) {
+    int mem_reserve(uint64_t dev_addr, uint64_t size, int flags)
+    {
         CHECK_ERR(global_mem_.reserve(dev_addr, size), {
             return err;
         });
@@ -145,11 +223,13 @@ public:
         return 0;
     }
 
-    int mem_free(uint64_t dev_addr) {
+    int mem_free(uint64_t dev_addr)
+    {
         return global_mem_.release(dev_addr);
     }
 
-    int mem_access(uint64_t dev_addr, uint64_t size, int flags) {
+    int mem_access(uint64_t dev_addr, uint64_t size, int flags)
+    {
         uint64_t asize = aligned_size(size, CACHE_BLOCK_SIZE);
         if (dev_addr + asize > GLOBAL_MEM_SIZE)
             return -1;
@@ -158,7 +238,8 @@ public:
         return 0;
     }
 
-    int mem_info(uint64_t* mem_free, uint64_t* mem_used) const {
+    int mem_info(uint64_t *mem_free, uint64_t *mem_used) const
+    {
         if (mem_free)
             *mem_free = global_mem_.free();
         if (mem_used)
@@ -166,13 +247,24 @@ public:
         return 0;
     }
 
-    int upload(uint64_t dest_addr, const void* src, uint64_t size) {
+    int upload(uint64_t dest_addr, const void *src, uint64_t size)
+    {
         uint64_t asize = aligned_size(size, CACHE_BLOCK_SIZE);
+        uint64_t pAddr = dest_addr; // map_local_mem overwrites the provided dest_addr, so store away physical destination address
         if (dest_addr + asize > GLOBAL_MEM_SIZE)
             return -1;
 
+        if (dest_addr >= STARTUP_ADDR)
+        {
+            map_local_mem(asize, &dest_addr);
+        }
+        else if (dest_addr >= 0x7fff0000)
+        {
+            map_local_mem(asize, &dest_addr);
+        }
+
         ram_.enable_acl(false);
-        ram_.write((const uint8_t*)src, dest_addr, size);
+        ram_.write((const uint8_t *)src, pAddr, size);
         ram_.enable_acl(true);
 
         /*DBGPRINT("upload %ld bytes to 0x%lx\n", size, dest_addr);
@@ -183,13 +275,14 @@ public:
         return 0;
     }
 
-    int download(void* dest, uint64_t src_addr, uint64_t size) {
+    int download(void *dest, uint64_t src_addr, uint64_t size)
+    {
         uint64_t asize = aligned_size(size, CACHE_BLOCK_SIZE);
         if (src_addr + asize > GLOBAL_MEM_SIZE)
             return -1;
 
         ram_.enable_acl(false);
-        ram_.read((uint8_t*)dest, src_addr, size);
+        ram_.read((uint8_t *)dest, src_addr, size);
         ram_.enable_acl(true);
 
         /*DBGPRINT("download %ld bytes from 0x%lx\n", size, src_addr);
@@ -200,13 +293,16 @@ public:
         return 0;
     }
 
-    int start(uint64_t krnl_addr, uint64_t args_addr) {
+    int start(uint64_t krnl_addr, uint64_t args_addr)
+    {
         // ensure prior run completed
-        if (future_.valid()) {
+        if (future_.valid())
+        {
             future_.wait();
         }
 
         // set kernel info
+        // TODO: new DCR for SATP
         this->dcr_write(VX_DCR_BASE_STARTUP_ADDR0, krnl_addr & 0xffffffff);
         this->dcr_write(VX_DCR_BASE_STARTUP_ADDR1, krnl_addr >> 32);
         this->dcr_write(VX_DCR_BASE_STARTUP_ARG0, args_addr & 0xffffffff);
@@ -215,9 +311,8 @@ public:
         profiling_begin(profiling_id_);
 
         // start new run
-        future_ = std::async(std::launch::async, [&]{
-            processor_.run();
-        });
+        future_ = std::async(std::launch::async, [&]
+                             { processor_.run(); });
 
         // clear mpm cache
         mpm_cache_.clear();
@@ -225,12 +320,14 @@ public:
         return 0;
     }
 
-    int ready_wait(uint64_t timeout) {
+    int ready_wait(uint64_t timeout)
+    {
         if (!future_.valid())
             return 0;
         uint64_t timeout_sec = timeout / 1000;
         std::chrono::seconds wait_time(1);
-        for (;;) {
+        for (;;)
+        {
             // wait for 1 sec and check status
             auto status = future_.wait_for(wait_time);
             if (status == std::future_status::ready)
@@ -242,8 +339,10 @@ public:
         return 0;
     }
 
-    int dcr_write(uint32_t addr, uint32_t value) {
-        if (future_.valid()) {
+    int dcr_write(uint32_t addr, uint32_t value)
+    {
+        if (future_.valid())
+        {
             future_.wait(); // ensure prior run completed
         }
         processor_.dcr_write(addr, value);
@@ -251,15 +350,18 @@ public:
         return 0;
     }
 
-    int dcr_read(uint32_t addr, uint32_t* value) const {
+    int dcr_read(uint32_t addr, uint32_t *value) const
+    {
         return dcrs_.read(addr, value);
     }
 
-    int mpm_query(uint32_t addr, uint32_t core_id, uint64_t* value) {
+    int mpm_query(uint32_t addr, uint32_t core_id, uint64_t *value)
+    {
         uint32_t offset = addr - VX_CSR_MPM_BASE;
         if (offset > 31)
             return -1;
-        if (mpm_cache_.count(core_id) == 0) {
+        if (mpm_cache_.count(core_id) == 0)
+        {
             uint64_t mpm_mem_addr = IO_MPM_ADDR + core_id * 32 * sizeof(uint64_t);
             CHECK_ERR(this->download(mpm_cache_[core_id].data(), mpm_mem_addr, 32 * sizeof(uint64_t)), {
                 return err;
@@ -269,28 +371,273 @@ public:
         return 0;
     }
 
+    void set_processor_satp(VA_MODE mode)
+    {
+        uint32_t satp;
+        if (mode == VA_MODE::BARE)
+            satp = 0;
+        else if (mode == VA_MODE::SV64)
+        {
+            satp = alloc_page_table();
+        }
+        processor_.set_satp(satp);
+    }
+
+    uint32_t get_ptbr()
+    {
+
+        return processor_.get_satp();
+    }
+
+    VA_MODE get_mode()
+    {
+        return VA_MODE::SV64;
+    }
+
+    void update_page_table(uint64_t pAddr, uint64_t vAddr)
+    {
+        std::cout << "mapping PPN 0x" << std::hex << pAddr << " to VPN 0x" << std::hex << vAddr << ":" << std::endl;
+        std::cout << "\t";
+        vAddr = vAddr << 12;
+        // Updating page table with the following mapping of (vAddr) to (pAddr).
+        uint64_t ppn_1, pte_addr, pte_bytes;
+        uint64_t vpn_1 = bits(vAddr, 22, 31);
+        uint64_t vpn_0 = bits(vAddr, 12, 21);
+
+        // Read first level PTE.
+        pte_addr = get_ptbr() + vpn_1 * PTE_SIZE;
+        pte_bytes = read_pte(pte_addr);
+
+        if (bit(pte_bytes, 0) && ((pte_bytes & 0xFFFFFFFF) != 0xbaadf00d))
+        {
+            // If valid bit set, proceed to next level using new ppn form PTE.
+            ppn_1 = (pte_bytes >> 10);
+            std::cout << pte_bytes;
+        }
+        else
+        {
+            // If valid bit not set, allocate a second level page table
+            //  in device memory and store ppn in PTE. Set rwx = 000 in PTE
+            // to indicate this is a pointer to the next level of the page table.
+
+            // HW: pte not initialized here
+            ppn_1 = alloc_page_table();
+            pte_bytes = ((ppn_1 << 10) | 0b0000000001);
+            std::cout << pte_bytes;
+            write_pte(pte_addr, pte_bytes);
+        }
+        std::cout << " --> " << std::endl
+                  << "\t\t";
+
+        // Read second level PTE.
+        pte_addr = ppn_1 + vpn_0 * PTE_SIZE;
+        pte_bytes = read_pte(pte_addr);
+
+        if (bit(pte_bytes, 0) && ((pte_bytes & 0xFFFFFFFF) != 0xbaadf00d))
+        {
+            std::cout << "ERROR, shouldn't be here" << std::endl;
+            // If valid bit is set, then the page is already allocated.
+            // Should not reach this point, a sanity check.
+        }
+        else
+        {
+            // If valid bit not set, write ppn of pAddr in PTE. Set rwx = 111 in PTE
+            // to indicate this is a leaf PTE and has the stated permissions.
+            pte_bytes = ((pAddr << 10) | 0b0000001111);
+            std::cout << pte_bytes;
+            write_pte(pte_addr, pte_bytes);
+
+            // If super paging is enabled.
+            if (SUPER_PAGING)
+            {
+                // Check if this second level Page Table can be promoted to a super page. Brute force
+                // method is used to iterate over all PTE entries of the table and check if they have
+                // their valid bit set.
+                bool superpage = true;
+                for (int i = 0; i < 1024; i++)
+                {
+                    pte_addr = (ppn_1 << 12) + i;
+                    pte_bytes = read_pte(pte_addr);
+
+                    if (!bit(pte_bytes, 0) && ((pte_bytes & 0xFFFFFFFF) != 0xbaadf00d))
+                    {
+                        superpage = false;
+                        break;
+                    }
+                }
+                if (superpage)
+                {
+                    // This can be promoted to a super page. Set root PTE to the first PTE of the
+                    // second level. This is because the first PTE of the second level already has the
+                    // correct PPN1, PPN0 set to zero and correct access bits.
+                    pte_addr = (ppn_1 << 12);
+                    pte_bytes = read_pte(pte_addr);
+                    pte_addr = get_ptbr() + vpn_1 * PTE_SIZE;
+                    write_pte(pte_addr, pte_bytes);
+                }
+            }
+        }
+        std::cout << " --> " << std::endl
+                  << "\t\t\t0x" << std::hex << pAddr << std::endl;
+    }
+
+    std::pair<uint64_t, uint8_t> page_table_walk(uint64_t vAddr_bits, uint64_t *size_bits)
+    {
+        uint64_t LEVELS = 2;
+        vAddr_SV64_t vAddr(vAddr_bits);
+        uint64_t pte_bytes;
+
+        // Get base page table.
+        uint64_t a = this->processor_.get_satp();
+        int i = LEVELS - 1;
+
+        while (true)
+        {
+
+            // Read PTE.
+            //  HW: ram read from 1st layer page table
+            ram_.read(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
+
+            // pte_bytes &= 0x00000000FFFFFFFF;
+            PTE_SV64_t pte(pte_bytes);
+
+            // Check if it has invalid flag bits.
+            if ((pte.v == 0) | ((pte.r == 0) & (pte.w == 1)))
+            {
+                throw Page_Fault_Exception("Page Fault : Attempted to access invalid entry. Entry: 0x");
+            }
+            // HW: this line tells if we're still looking for metadata or the final PTE
+            if ((pte.r == 0) & (pte.w == 0) & (pte.x == 0))
+            {
+                // Not a leaf node as rwx == 000
+                i--;
+                if (i < 0)
+                {
+                    throw Page_Fault_Exception("Page Fault : No leaf node found.");
+                }
+                else
+                {
+                    // Continue on to next level.
+                    //  shift off bottom 10 bits (status, offset, etc)
+                    a = (pte_bytes >> 10);
+                }
+            }
+            else
+            {
+                // Leaf node found, finished walking.
+                //  actual physical addr found
+                a = (pte_bytes >> 10) << 12;
+                break;
+            }
+        }
+
+        PTE_SV64_t pte(pte_bytes);
+
+        // Check RWX permissions according to access type.
+        if (pte.r == 0)
+        {
+            throw Page_Fault_Exception("Page Fault : TYPE LOAD, Incorrect permissions.");
+        }
+
+        uint64_t pfn;
+        if (i > 0)
+        {
+            // It is a super page.
+            if (pte.ppn[0] != 0)
+            {
+                // Misss aligned super page.
+                throw Page_Fault_Exception("Page Fault : Miss Aligned Super Page.");
+            }
+            else
+            {
+                // Valid super page.
+                pfn = pte.ppn[1];
+                *size_bits = 22;
+            }
+        }
+
+        else
+        {
+            // Regular page.
+            *size_bits = 12;
+            pfn = a >> 12;
+        }
+        return std::make_pair(pfn, pte_bytes & 0xff);
+    }
+
+    uint64_t alloc_page_table()
+    {
+        uint64_t addr;
+        global_mem_.allocate(RAM_PAGE_SIZE * 2, &addr);
+        init_page_table(addr);
+        return addr;
+    }
+
+    void init_page_table(uint64_t addr)
+    {
+        uint64_t asize = aligned_size(RAM_PAGE_SIZE * 2, CACHE_BLOCK_SIZE);
+        uint8_t *src = new uint8_t[RAM_PAGE_SIZE * 2];
+        for (uint64_t i = 0; i < RAM_PAGE_SIZE * 2; ++i)
+        {
+            src[i] = (0x00000000 >> ((i & 0x3) * 8)) & 0xff;
+        }
+        ram_.write((const uint8_t *)src, addr, asize);
+    }
+
+    void read_page_table(uint64_t addr)
+    {
+        uint8_t *dest = new uint8_t[RAM_PAGE_SIZE * 2];
+        download(dest, addr, RAM_PAGE_SIZE * 2);
+        printf("VXDRV: download %d bytes from 0x%x\n", RAM_PAGE_SIZE * 2, addr);
+        for (int i = 0; i < RAM_PAGE_SIZE * 2; i += 4)
+        {
+            printf("mem-read: 0x%x -> 0x%x\n", addr + i, *(uint64_t *)((uint8_t *)dest + i));
+        }
+    }
+
+    void write_pte(uint64_t addr, uint64_t value = 0xbaadf00d)
+    {
+        uint8_t *src = new uint8_t[PTE_SIZE];
+        for (uint64_t i = 0; i < PTE_SIZE; ++i)
+        {
+            //(value >> ((i & 0x3) * 8)) & 0xff;
+            src[i] = (value >> (i * 8)) & 0xff;
+        }
+        ram_.write((const uint8_t *)src, addr, PTE_SIZE);
+    }
+
+    uint64_t read_pte(uint64_t addr)
+    {
+        uint8_t *dest = new uint8_t[PTE_SIZE];
+        ram_.read((uint8_t *)dest, addr, PTE_SIZE);
+        return *(uint64_t *)((uint8_t *)dest);
+    }
+
 private:
-    Arch                arch_;
-    RAM                 ram_;
-    Processor           processor_;
-    MemoryAllocator     global_mem_;
-    DeviceConfig        dcrs_;
-    std::future<void>   future_;
+    Arch arch_;
+    RAM ram_;
+    Processor processor_;
+    MemoryAllocator global_mem_;
+    DeviceConfig dcrs_;
+    std::future<void> future_;
+    std::unordered_map<uint64_t, uint64_t> addr_mapping;
     std::unordered_map<uint32_t, std::array<uint64_t, 32>> mpm_cache_;
     int profiling_id_;
 };
 
-struct vx_buffer {
-    vx_device* device;
+struct vx_buffer
+{
+    vx_device *device;
     uint64_t addr;
     uint64_t size;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
-extern int vx_dev_open(vx_device_h* hdevice) {
+extern int vx_dev_open(vx_device_h *hdevice)
+{
     if (nullptr == hdevice)
-        return  -1;
+        return -1;
 
     auto device = new vx_device();
     if (device == nullptr)
@@ -301,31 +648,33 @@ extern int vx_dev_open(vx_device_h* hdevice) {
         return err;
     });
 
-    DBGPRINT("DEV_OPEN: hdevice=%p\n", (void*)device);
+    DBGPRINT("DEV_OPEN: hdevice=%p\n", (void *)device);
 
     *hdevice = device;
 
     return 0;
 }
 
-extern int vx_dev_close(vx_device_h hdevice) {
+extern int vx_dev_close(vx_device_h hdevice)
+{
     if (nullptr == hdevice)
         return -1;
 
     DBGPRINT("DEV_CLOSE: hdevice=%p\n", hdevice);
 
-    auto device = ((vx_device*)hdevice);
+    auto device = ((vx_device *)hdevice);
 
     delete device;
 
     return 0;
 }
 
-extern int vx_dev_caps(vx_device_h hdevice, uint32_t caps_id, uint64_t *value) {
+extern int vx_dev_caps(vx_device_h hdevice, uint32_t caps_id, uint64_t *value)
+{
     if (nullptr == hdevice)
         return -1;
 
-    vx_device *device = ((vx_device*)hdevice);
+    vx_device *device = ((vx_device *)hdevice);
 
     uint64_t _value;
 
@@ -340,13 +689,12 @@ extern int vx_dev_caps(vx_device_h hdevice, uint32_t caps_id, uint64_t *value) {
     return 0;
 }
 
-extern int vx_mem_alloc(vx_device_h hdevice, uint64_t size, int flags, vx_buffer_h* hbuffer) {
-    if (nullptr == hdevice
-     || nullptr == hbuffer
-     || 0 == size)
+extern int vx_mem_alloc(vx_device_h hdevice, uint64_t size, int flags, vx_buffer_h *hbuffer)
+{
+    if (nullptr == hdevice || nullptr == hbuffer || 0 == size)
         return -1;
 
-    auto device = ((vx_device*)hdevice);
+    auto device = ((vx_device *)hdevice);
 
     uint64_t dev_addr;
     CHECK_ERR(device->mem_alloc(size, flags, &dev_addr), {
@@ -354,53 +702,63 @@ extern int vx_mem_alloc(vx_device_h hdevice, uint64_t size, int flags, vx_buffer
     });
 
     auto buffer = new vx_buffer{device, dev_addr, size};
-    if (nullptr == buffer) {
+    if (nullptr == buffer)
+    {
         device->mem_free(dev_addr);
         return -1;
     }
 
-    DBGPRINT("MEM_ALLOC: hdevice=%p, size=%ld, flags=0x%d, hbuffer=%p\n", hdevice, size, flags, (void*)buffer);
+    DBGPRINT("MEM_ALLOC: hdevice=%p, size=%ld, flags=0x%d, hbuffer=%p\n", hdevice, size, flags, (void *)buffer);
 
     *hbuffer = buffer;
 
     return 0;
 }
 
-extern int vx_mem_reserve(vx_device_h hdevice, uint64_t address, uint64_t size, int flags, vx_buffer_h* hbuffer) {
-    if (nullptr == hdevice
-     || nullptr == hbuffer
-     || 0 == size)
+extern int vx_mem_reserve(vx_device_h hdevice, uint64_t address, uint64_t size, int flags, vx_buffer_h *hbuffer)
+{
+    if (nullptr == hdevice || nullptr == hbuffer || 0 == size)
         return -1;
 
-    auto device = ((vx_device*)hdevice);
+    auto device = ((vx_device *)hdevice);
 
     CHECK_ERR(device->mem_reserve(address, size, flags), {
         return err;
     });
 
     auto buffer = new vx_buffer{device, address, size};
-    if (nullptr == buffer) {
+    if (nullptr == buffer)
+    {
         device->mem_free(address);
         return -1;
     }
 
-    DBGPRINT("MEM_RESERVE: hdevice=%p, address=0x%lx, size=%ld, flags=0x%d, hbuffer=%p\n", hdevice, address, size, flags, (void*)buffer);
+    DBGPRINT("MEM_RESERVE: hdevice=%p, address=0x%lx, size=%ld, flags=0x%d, hbuffer=%p\n", hdevice, address, size, flags, (void *)buffer);
 
     *hbuffer = buffer;
 
     return 0;
 }
 
-extern int vx_mem_free(vx_buffer_h hbuffer) {
+extern int vx_mem_free(vx_buffer_h hbuffer)
+{
     if (nullptr == hbuffer)
         return 0;
 
     DBGPRINT("MEM_FREE: hbuffer=%p\n", hbuffer);
 
-    auto buffer = ((vx_buffer*)hbuffer);
-    auto device = ((vx_device*)buffer->device);
+    auto buffer = ((vx_buffer *)hbuffer);
+    auto device = ((vx_device *)buffer->device);
 
-    vx_mem_access(hbuffer, 0, buffer->size, 0);
+    std::cout << "addr: " << buffer->addr << std::endl;
+
+    // uint64_t size_bits;
+    // std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr, &size_bits);
+    // uint64_t pfn = ptw_access.first;
+    // buffer->addr = (pfn << 12) + 0x40;
+
+    if (0 == buffer->addr)
+        return 0;
 
     int err = device->mem_free(buffer->addr);
 
@@ -409,12 +767,13 @@ extern int vx_mem_free(vx_buffer_h hbuffer) {
     return err;
 }
 
-extern int vx_mem_access(vx_buffer_h hbuffer, uint64_t offset, uint64_t size, int flags) {
+extern int vx_mem_access(vx_buffer_h hbuffer, uint64_t offset, uint64_t size, int flags)
+{
     if (nullptr == hbuffer)
         return -1;
 
-    auto buffer = ((vx_buffer*)hbuffer);
-    auto device = ((vx_device*)buffer->device);
+    auto buffer = ((vx_buffer *)hbuffer);
+    auto device = ((vx_device *)buffer->device);
 
     if ((offset + size) > buffer->size)
         return -1;
@@ -424,11 +783,12 @@ extern int vx_mem_access(vx_buffer_h hbuffer, uint64_t offset, uint64_t size, in
     return device->mem_access(buffer->addr + offset, size, flags);
 }
 
-extern int vx_mem_address(vx_buffer_h hbuffer, uint64_t* address) {
+extern int vx_mem_address(vx_buffer_h hbuffer, uint64_t *address)
+{
     if (nullptr == hbuffer)
         return -1;
 
-    auto buffer = ((vx_buffer*)hbuffer);
+    auto buffer = ((vx_buffer *)hbuffer);
 
     DBGPRINT("MEM_ADDRESS: hbuffer=%p, address=0x%lx\n", hbuffer, buffer->addr);
 
@@ -437,11 +797,12 @@ extern int vx_mem_address(vx_buffer_h hbuffer, uint64_t* address) {
     return 0;
 }
 
-extern int vx_mem_info(vx_device_h hdevice, uint64_t* mem_free, uint64_t* mem_used) {
+extern int vx_mem_info(vx_device_h hdevice, uint64_t *mem_free, uint64_t *mem_used)
+{
     if (nullptr == hdevice)
         return -1;
 
-    auto device = ((vx_device*)hdevice);
+    auto device = ((vx_device *)hdevice);
 
     uint64_t _mem_free, _mem_used;
 
@@ -451,76 +812,99 @@ extern int vx_mem_info(vx_device_h hdevice, uint64_t* mem_free, uint64_t* mem_us
 
     DBGPRINT("MEM_INFO: hdevice=%p, mem_free=%ld, mem_used=%ld\n", hdevice, _mem_free, _mem_used);
 
-    if (mem_free) {
+    if (mem_free)
+    {
         *mem_free = _mem_free;
     }
 
-    if (mem_used) {
+    if (mem_used)
+    {
         *mem_used = _mem_used;
     }
 
     return 0;
 }
 
-extern int vx_copy_to_dev(vx_buffer_h hbuffer, const void* host_ptr, uint64_t dst_offset, uint64_t size) {
+extern int vx_copy_to_dev(vx_buffer_h hbuffer, const void *host_ptr, uint64_t dst_offset, uint64_t size)
+{
     if (nullptr == hbuffer || nullptr == host_ptr)
         return -1;
 
-    auto buffer = ((vx_buffer*)hbuffer);
-    auto device = ((vx_device*)buffer->device);
+    auto buffer = ((vx_buffer *)hbuffer);
+    auto device = ((vx_device *)buffer->device);
 
     if ((dst_offset + size) > buffer->size)
         return -1;
+    if (!(buffer->addr + dst_offset == STARTUP_ADDR) && !(buffer->addr + dst_offset == 0x7FFFF000))
+    {
+        uint64_t offset = buffer->addr % RAM_PAGE_SIZE;
+        uint64_t size_bits;
+        std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr + dst_offset, &size_bits);
+        uint64_t pfn = ptw_access.first;
+        buffer->addr = (pfn << 12) + offset;
+        // return device->upload((pfn << 12) + offset, host_ptr, size);
+    }
 
     DBGPRINT("COPY_TO_DEV: hbuffer=%p, host_addr=%p, dst_offset=%ld, size=%ld\n", hbuffer, host_ptr, dst_offset, size);
 
-    return device->upload(buffer->addr + dst_offset, host_ptr, size);
+    return device->upload(buffer->addr, host_ptr, size);
 }
 
-extern int vx_copy_from_dev(void* host_ptr, vx_buffer_h hbuffer, uint64_t src_offset, uint64_t size) {
+extern int vx_copy_from_dev(void *host_ptr, vx_buffer_h hbuffer, uint64_t src_offset, uint64_t size)
+{
     if (nullptr == hbuffer || nullptr == host_ptr)
         return -1;
 
-    auto buffer = ((vx_buffer*)hbuffer);
-    auto device = ((vx_device*)buffer->device);
+    auto buffer = ((vx_buffer *)hbuffer);
+    auto device = ((vx_device *)buffer->device);
 
     if ((src_offset + size) > buffer->size)
         return -1;
 
     DBGPRINT("COPY_FROM_DEV: hbuffer=%p, host_addr=%p, src_offset=%ld, size=%ld\n", hbuffer, host_ptr, src_offset, size);
 
-    return device->download(host_ptr, buffer->addr + src_offset, size);
+    std::cout << "copy from virtual " << buffer->addr << std::endl;
+    uint64_t offset = buffer->addr % RAM_PAGE_SIZE;
+    uint64_t size_bits;
+    std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr + src_offset, &size_bits);
+    uint64_t pfn = ptw_access.first;
+    std::cout << "copy from physical " << (pfn << 12) + offset << std::endl;
+    buffer->addr = (pfn << 12) + offset;
+    return device->download(host_ptr, (pfn << 12) + offset, size);
 }
 
-extern int vx_start(vx_device_h hdevice, vx_buffer_h hkernel, vx_buffer_h harguments) {
+extern int vx_start(vx_device_h hdevice, vx_buffer_h hkernel, vx_buffer_h harguments)
+{
     if (nullptr == hdevice || nullptr == hkernel || nullptr == harguments)
         return -1;
 
     DBGPRINT("START: hdevice=%p, hkernel=%p, harguments=%p\n", hdevice, hkernel, harguments);
 
-    auto device = ((vx_device*)hdevice);
-    auto kernel = ((vx_buffer*)hkernel);
-    auto arguments = ((vx_buffer*)harguments);
+    auto device = ((vx_device *)hdevice);
+    auto kernel = ((vx_buffer *)hkernel);
+    auto arguments = ((vx_buffer *)harguments);
 
     return device->start(kernel->addr, arguments->addr);
 }
 
-extern int vx_ready_wait(vx_device_h hdevice, uint64_t timeout) {
+extern int vx_ready_wait(vx_device_h hdevice, uint64_t timeout)
+{
     if (nullptr == hdevice)
         return -1;
 
     DBGPRINT("READY_WAIT: hdevice=%p, timeout=%ld\n", hdevice, timeout);
 
-    auto device = ((vx_device*)hdevice);
+    auto device = ((vx_device *)hdevice);
 
     return device->ready_wait(timeout);
 }
 
-extern int vx_dcr_read(vx_device_h hdevice, uint32_t addr, uint32_t* value) {
+extern int vx_dcr_read(vx_device_h hdevice, uint32_t addr, uint32_t *value)
+{
     if (nullptr == hdevice || NULL == value)
         return -1;
 
-    auto device = ((vx_device*)hdevice);
+    auto device = ((vx_device *)hdevice);
 
     uint32_t _value;
 
@@ -535,22 +919,24 @@ extern int vx_dcr_read(vx_device_h hdevice, uint32_t addr, uint32_t* value) {
     return 0;
 }
 
-extern int vx_dcr_write(vx_device_h hdevice, uint32_t addr, uint32_t value) {
+extern int vx_dcr_write(vx_device_h hdevice, uint32_t addr, uint32_t value)
+{
     if (nullptr == hdevice)
         return -1;
 
     DBGPRINT("DCR_WRITE: hdevice=%p, addr=0x%x, value=0x%x\n", hdevice, addr, value);
 
-    auto device = ((vx_device*)hdevice);
+    auto device = ((vx_device *)hdevice);
 
     return device->dcr_write(addr, value);
 }
 
-extern int vx_mpm_query(vx_device_h hdevice, uint32_t addr, uint32_t core_id, uint64_t* value) {
+extern int vx_mpm_query(vx_device_h hdevice, uint32_t addr, uint32_t core_id, uint64_t *value)
+{
     if (nullptr == hdevice)
         return -1;
 
-    auto device = ((vx_device*)hdevice);
+    auto device = ((vx_device *)hdevice);
 
     uint64_t _value;
 

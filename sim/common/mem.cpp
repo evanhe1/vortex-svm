@@ -435,3 +435,14 @@ void RAM::loadHexImage(const char* filename) {
     --size;
   }
 }
+
+uint32_t MemoryUnit::get_satp()
+{
+  return satp;
+}  
+void MemoryUnit::set_satp(uint32_t satp)
+{
+  this->satp = satp;
+  this->ptbr = satp & 0x003fffff;
+  this->mode = VA_MODE::SV64;
+}

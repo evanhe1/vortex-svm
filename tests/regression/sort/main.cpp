@@ -56,9 +56,13 @@ static void parse_args(int argc, char **argv) {
 
 void cleanup() {
   if (device) {
+    std::cout << "free src_buffer" << std::endl;
     vx_mem_free(src_buffer);
+    std::cout << "free dst_buffer" << std::endl;
     vx_mem_free(dst_buffer);
+    std::cout << "free krnl_buffer" << std::endl;
     vx_mem_free(krnl_buffer);
+    std::cout << "free args_buffer" << std::endl;
     vx_mem_free(args_buffer);
     vx_dev_close(device);
   }
@@ -103,8 +107,11 @@ int main(int argc, char *argv[]) {
 
   uint64_t num_cores, num_warps, num_threads;
   RT_CHECK(vx_dev_caps(device, VX_CAPS_NUM_CORES, &num_cores));
+
   RT_CHECK(vx_dev_caps(device, VX_CAPS_NUM_WARPS, &num_warps));
+
   RT_CHECK(vx_dev_caps(device, VX_CAPS_NUM_THREADS, &num_threads));
+
 
   uint32_t total_threads = num_cores * num_warps * num_threads;
   uint32_t num_points = count * total_threads;

@@ -57,6 +57,8 @@ public:
     , tx_cb_(nullptr)
   {}
 
+  void send(const Pkt& pkt, uint64_t delay = 1) const;
+
   void bind(SimPort<Pkt>* peer) {
     assert(peer_ == nullptr);
     peer_ = peer;

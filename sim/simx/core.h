@@ -105,6 +105,10 @@ public:
 
   bool wspawn(uint32_t num_warps, Word nextPC);
 
+  uint32_t get_csr(uint32_t addr, uint32_t tid, uint32_t wid);
+  
+  void set_csr(uint32_t addr, uint32_t value, uint32_t tid, uint32_t wid);
+
   uint32_t id() const {
     return core_id_;
   }
@@ -142,6 +146,10 @@ private:
 
   Emulator emulator_;
 
+  MemoryUnit mmu_;
+
+  std::vector<Byte> fcsrs_;
+  std::vector<std::vector<CSRs>> csrs_;
   std::vector<IBuffer> ibuffers_;
   Scoreboard scoreboard_;
   std::vector<Operand::Ptr> operands_;

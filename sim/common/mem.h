@@ -18,8 +18,30 @@
 #include <map>
 #include <unordered_map>
 #include <cstdint>
+#include <stdexcept>
 
 namespace vortex {
+enum VA_MODE
+{
+  BARE,
+  SV64
+};
+
+enum ACCESS_TYPE
+{
+  LOAD,
+  STORE,
+  FETCH
+};
+
+class Page_Fault_Exception : public std::runtime_error /* or logic_error */
+{
+public:
+    Page_Fault_Exception(const std::string& what = "") : std::runtime_error(what) {}
+    uint64_t addr;
+    ACCESS_TYPE type;
+};
+
 struct BadAddress {};
 struct OutOfRange {};
 
@@ -98,6 +120,9 @@ public:
     tlb_.clear();
   }
 
+  uint32_t get_satp();  
+  void set_satp(uint32_t satp);
+
 private:
 
   struct amo_reservation_t {
@@ -150,6 +175,10 @@ private:
   uint64_t  pageSize_;
   ADecoder  decoder_;
   bool      enableVM_;
+
+  uint32_t satp;
+  VA_MODE mode;
+  uint32_t ptbr;
 
   amo_reservation_t amo_reservation_;
 };
@@ -217,6 +246,68 @@ private:
   mutable uint64_t last_page_index_;
   ACLManager acl_mngr_;
   bool check_acl_;
+};
+
+class PTE_SV64_t 
+{
+
+  private:
+    uint64_t address;
+    uint64_t bits(uint64_t addr, uint8_t s_idx, uint8_t e_idx)
+    {
+        return (addr >> s_idx) & ((1 << (e_idx - s_idx + 1)) - 1);
+    }
+    bool bit(uint8_t idx)
+    {
+        return (address) & (1 << idx);
+    }
+
+  public:
+    uint64_t ppn[2];
+    uint32_t rsw;
+    uint32_t flags;
+    bool d, a, g, u, x, w, r, v;
+    PTE_SV64_t(uint64_t address) : address(address)
+    { 
+      flags =  bits(address,0,7);
+      rsw = bits(address,8,9);
+      ppn[0] = bits(address,10,19);
+      ppn[1] = bits(address,20,31);
+
+      d = bit(7);
+      a = bit(6);
+      g = bit(5);
+      u = bit(4);
+      x = bit(3);
+      w = bit(2);
+      r = bit(1);
+      v = bit(0);
+    }
+};
+
+class vAddr_SV64_t 
+{
+
+  private:
+    uint64_t address;
+    uint64_t bits(uint64_t addr, uint8_t s_idx, uint8_t e_idx)
+    {
+        return (addr >> s_idx) & ((1 << (e_idx - s_idx + 1)) - 1);
+    }
+    bool bit(uint64_t addr, uint8_t idx)
+    {
+        return (addr) & (1 << idx);
+    }
+
+  public:
+    uint64_t vpn[2];
+    uint64_t pgoff;
+    vAddr_SV64_t(uint64_t address) : address(address)
+    {
+      vpn[0] = bits(address,12,21);
+      vpn[1] = bits(address,22,31);
+      pgoff = bits(address,0,11);
+    }
 };
 
 } // namespace vortex

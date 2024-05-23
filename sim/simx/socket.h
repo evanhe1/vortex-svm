@@ -68,6 +68,8 @@ public:
 
   void resume(uint32_t core_id);
 
+  std::vector<Core::Ptr> get_cores_();
+
   PerfStats perf_stats() const;
   
 private:
