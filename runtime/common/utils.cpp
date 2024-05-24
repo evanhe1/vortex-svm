@@ -139,6 +139,14 @@ int dcr_initialize(vx_device_h hdevice) {
     return _ret;
   });
 
+  RT_CHECK(vx_dcr_write(hdevice, VX_DCR_BASE_SATP_ADDR0, 0), {
+    return _ret;
+  });
+  
+  RT_CHECK(vx_dcr_write(hdevice, VX_DCR_BASE_SATP_ADDR1, 0), {
+    return _ret;
+  });
+
   return 0;
 }
 

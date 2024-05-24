@@ -154,10 +154,10 @@ public:
             return 0;
         }
 
-        uint64_t ppn = *dev_maddr >> 12;
-        uint64_t init_pAddr = *dev_maddr;
+        uint64_t ppn = *dev_maddr >> 12; // 4 KB pages
+        uint64_t init_pAddr = *dev_maddr; 
         uint64_t init_vAddr = *dev_maddr + 0xf0000000; // vpn will change, but we want to return the vpn of the beginning of the virtual allocation
-        init_vAddr = (init_vAddr >> 12) << 12;
+        init_vAddr = (init_vAddr >> 12) << 12; // Shift off any page offset bits
         uint64_t vpn;
 
         // dev_maddr can be of size greater than a page, but we have to map and update
@@ -307,6 +307,8 @@ public:
         this->dcr_write(VX_DCR_BASE_STARTUP_ADDR1, krnl_addr >> 32);
         this->dcr_write(VX_DCR_BASE_STARTUP_ARG0, args_addr & 0xffffffff);
         this->dcr_write(VX_DCR_BASE_STARTUP_ARG1, args_addr >> 32);
+        this->dcr_write(VX_DCR_BASE_SATP_ADDR0, this->satp & 0xffffffff);
+        this->dcr_write(VX_DCR_BASE_SATP_ADDR1, this->satp >> 32);
 
         profiling_begin(profiling_id_);
 
@@ -375,12 +377,11 @@ public:
     {
         uint32_t satp;
         if (mode == VA_MODE::BARE)
-            satp = 0;
+            this->satp = 0;
         else if (mode == VA_MODE::SV64)
         {
-            satp = alloc_page_table();
+            this->satp = alloc_page_table();
         }
-        processor_.set_satp(satp);
     }
 
     uint32_t get_ptbr()
@@ -623,6 +624,7 @@ private:
     std::unordered_map<uint64_t, uint64_t> addr_mapping;
     std::unordered_map<uint32_t, std::array<uint64_t, 32>> mpm_cache_;
     int profiling_id_;
+    uint64_t satp;
 };
 
 struct vx_buffer

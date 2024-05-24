@@ -96,6 +96,15 @@ void Emulator::clear()
   startup_arg |= (uint64_t(dcrs_.base_dcrs.read(VX_DCR_BASE_STARTUP_ARG1)) << 32);
 #endif
 
+  // Extract base address of page_table
+  uint64_t base_satp = dcrs_.base_dcrs.read(VX_DCR_BASE_SATP_ADDR0);
+#if (XLEN == 64)
+  base_satp |= (uint64_t(dcrs_.base_dcrs.read(VX_DCR_BASE_SATP_ADDR1)) << 32);
+#endif
+
+  // Set corresponding page table csr
+  set_csr(VX_CSR_SATP, base_satp, 0, 0);
+
   for (auto &warp : warps_)
   {
     warp.clear(startup_addr);
@@ -555,6 +564,8 @@ void Emulator::set_csr(uint32_t addr, Word value, uint32_t tid, uint32_t wid)
     csr_mscratch_ = value;
     break;
   case VX_CSR_SATP:
+    mmu_.set_satp(value);
+    break;
   case VX_CSR_MSTATUS:
   case VX_CSR_MEDELEG:
   case VX_CSR_MIDELEG:
