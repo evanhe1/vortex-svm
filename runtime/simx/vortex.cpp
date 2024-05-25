@@ -195,14 +195,15 @@ public:
         CHECK_ERR(global_mem_.allocate(size, &addr), {
             return err;
         });
-        std::cout << "physical: " << addr << std::endl;
+        printf("physical: %x\n", addr);
         uint64_t offset = addr % RAM_PAGE_SIZE;
         uint64_t temp_addr = addr;
         CHECK_ERR(map_local_mem(size, &addr), {
             return err;
         });
-        std::cout << "virtual: " << addr << std::endl;
-
+        printf("virtual: %x\n", addr);
+        printf("Page Offset: %x\n", offset);
+        printf("Size: %d\n", size);
         // CHECK_ERR(this->mem_access(addr, size, flags), {
         //     global_mem_.release(addr);
         //     return err;
@@ -300,7 +301,9 @@ public:
         {
             future_.wait();
         }
-
+        for (auto i = addr_mapping.begin(); i != addr_mapping.end(); i++) {
+            std::cout << "virtual: " << std::hex << i->first << " to physical: " << std::hex << i->second << std::endl;
+        }
         // set kernel info
         // TODO: new DCR for SATP
         this->dcr_write(VX_DCR_BASE_STARTUP_ADDR0, krnl_addr & 0xffffffff);
@@ -424,7 +427,8 @@ public:
             // HW: pte not initialized here
             ppn_1 = alloc_page_table();
             pte_bytes = ((ppn_1 << 10) | 0b0000000001);
-            std::cout << pte_bytes;
+            std::cout << "pte entry: " << std::hex << pte_bytes ;
+            std::cout << std::hex << " vpn: " << vpn_1;
             write_pte(pte_addr, pte_bytes);
         }
         std::cout << " --> " << std::endl
@@ -445,7 +449,8 @@ public:
             // If valid bit not set, write ppn of pAddr in PTE. Set rwx = 111 in PTE
             // to indicate this is a leaf PTE and has the stated permissions.
             pte_bytes = ((pAddr << 10) | 0b0000001111);
-            std::cout << pte_bytes;
+            std::cout << "pte entry: " << std::hex << pte_bytes ;
+            std::cout << std::hex << " vpn: " << vpn_0;
             write_pte(pte_addr, pte_bytes);
 
             // If super paging is enabled.
@@ -505,6 +510,11 @@ public:
             // Check if it has invalid flag bits.
             if ((pte.v == 0) | ((pte.r == 0) & (pte.w == 1)))
             {
+                printf("Fault in vortex.cpp\n");
+                printf("Faulitng vAddr: %lx\n", vAddr_bits);
+                printf("Faulting ppn: %lx\n", pte.ppn[0]);
+                printf("Faulting ppn: %lx\n", pte.ppn[1]);
+                printf("Faulting ppn flags: %x\n", pte.flags);
                 throw Page_Fault_Exception("Page Fault : Attempted to access invalid entry. Entry: 0x");
             }
             // HW: this line tells if we're still looking for metadata or the final PTE
@@ -713,7 +723,7 @@ extern int vx_mem_alloc(vx_device_h hdevice, uint64_t size, int flags, vx_buffer
     DBGPRINT("MEM_ALLOC: hdevice=%p, size=%ld, flags=0x%d, hbuffer=%p\n", hdevice, size, flags, (void *)buffer);
 
     *hbuffer = buffer;
-
+    std::cout << "address: " << std::hex << buffer->addr << std::endl;
     return 0;
 }
 
@@ -754,10 +764,11 @@ extern int vx_mem_free(vx_buffer_h hbuffer)
 
     std::cout << "addr: " << buffer->addr << std::endl;
 
-    // uint64_t size_bits;
-    // std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr, &size_bits);
-    // uint64_t pfn = ptw_access.first;
-    // buffer->addr = (pfn << 12) + 0x40;
+    uint64_t offset = buffer->addr % RAM_PAGE_SIZE;
+    uint64_t size_bits;
+    std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr, &size_bits);
+    uint64_t pfn = ptw_access.first;
+    buffer->addr = (pfn << 12) + offset;
 
     if (0 == buffer->addr)
         return 0;
@@ -827,6 +838,7 @@ extern int vx_mem_info(vx_device_h hdevice, uint64_t *mem_free, uint64_t *mem_us
     return 0;
 }
 
+// Shouldn't need this with Virtual Memory
 extern int vx_copy_to_dev(vx_buffer_h hbuffer, const void *host_ptr, uint64_t dst_offset, uint64_t size)
 {
     if (nullptr == hbuffer || nullptr == host_ptr)
@@ -837,18 +849,19 @@ extern int vx_copy_to_dev(vx_buffer_h hbuffer, const void *host_ptr, uint64_t ds
 
     if ((dst_offset + size) > buffer->size)
         return -1;
+    
     if (!(buffer->addr + dst_offset == STARTUP_ADDR) && !(buffer->addr + dst_offset == 0x7FFFF000))
     {
         uint64_t offset = buffer->addr % RAM_PAGE_SIZE;
         uint64_t size_bits;
         std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr + dst_offset, &size_bits);
         uint64_t pfn = ptw_access.first;
-        buffer->addr = (pfn << 12) + offset;
-        // return device->upload((pfn << 12) + offset, host_ptr, size);
+        uint64_t phys_addr = (pfn << 12) + offset;
+        DBGPRINT("COPY_TO_DEV: hbuffer=%p, host_addr=%p, dst_offset=%ld, size=%ld\n", hbuffer, host_ptr, dst_offset, size);
+        return device->upload(phys_addr, host_ptr, size);
     }
-
+    
     DBGPRINT("COPY_TO_DEV: hbuffer=%p, host_addr=%p, dst_offset=%ld, size=%ld\n", hbuffer, host_ptr, dst_offset, size);
-
     return device->upload(buffer->addr, host_ptr, size);
 }
 
@@ -871,7 +884,6 @@ extern int vx_copy_from_dev(void *host_ptr, vx_buffer_h hbuffer, uint64_t src_of
     std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr + src_offset, &size_bits);
     uint64_t pfn = ptw_access.first;
     std::cout << "copy from physical " << (pfn << 12) + offset << std::endl;
-    buffer->addr = (pfn << 12) + offset;
     return device->download(host_ptr, (pfn << 12) + offset, size);
 }
 

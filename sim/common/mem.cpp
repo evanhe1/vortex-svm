@@ -16,6 +16,7 @@
 #include <iostream>
 #include <fstream>
 #include <assert.h>
+#include <VX_config.h>
 #include "util.h"
 
 using namespace vortex;
@@ -140,7 +141,8 @@ MemoryUnit::TLBEntry MemoryUnit::tlbLookup(uint64_t vAddr, uint32_t flagMask) {
     if (iter->second.flags & flagMask)
       return iter->second;
     else {
-      throw PageFault(vAddr, false);
+     throw PageFault(vAddr, false);
+      
     }
   } else {
     throw PageFault(vAddr, true);
@@ -149,22 +151,132 @@ MemoryUnit::TLBEntry MemoryUnit::tlbLookup(uint64_t vAddr, uint32_t flagMask) {
 
 uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
   uint64_t pAddr;
-  if (enableVM_) {
-    TLBEntry t = this->tlbLookup(addr, flagMask);
-    pAddr = t.pfn * pageSize_ + addr % pageSize_;
+  uint64_t pfn;
+  uint64_t size_bits;
+  if (enableVM_ && !(addr >= STARTUP_ADDR && addr < STARTUP_ADDR + RAM_PAGE_SIZE)) {
+    // TODO: Add TLB support
+    //TLBEntry t = this->tlbLookup(addr, flagMask);
+    std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
+    pfn = ptw_access.first;
+    pAddr = pfn << size_bits + (addr & ((1 << size_bits) - 1));
   } else {
     pAddr = addr;
   }
   return pAddr;
 }
 
+std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, uint64_t* size_bits)
+{   
+    uint64_t LEVELS = 2;
+    vAddr_SV64_t vAddr(vAddr_bits);
+    uint64_t pte_bytes;
+
+    //Get base page table.
+    uint64_t a = this->ptbr;
+    int i = LEVELS - 1; 
+
+    while(true)
+    {
+
+      //Read PTE.
+      decoder_.read(&pte_bytes, vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
+      PTE_SV64_t pte(pte_bytes);
+      
+      //Check if it has invalid flag bits.
+      
+      if ( (pte.v == 0) | ( (pte.r == 0) & (pte.w == 1) ) )
+      {
+        printf("ptbr on fault: %lx\n", ptbr);
+        printf("Fault in mem.cpp\n");
+        printf("Faulitng vAddr: %lx\n", vAddr_bits);
+        printf("vpn level 1: %lx\n", vAddr.vpn[1]);
+        printf("vpn level 0: %lx\n", vAddr.vpn[0]);
+        printf("Faulting vpn: %lx\n", vAddr.vpn[i]);
+        printf("Faulting ppn: %lx\n", pte.ppn[i]);
+        printf("Faulting ppn flags: %x\n", pte.flags);
+        throw Page_Fault_Exception("Page Fault : Attempted to access invalid entry.");
+      }
+
+      if ( (pte.r == 0) & (pte.w == 0) & (pte.x == 0))
+      {
+        //Not a leaf node as rwx == 000
+        i--;
+        if (i < 0)
+        {
+          throw Page_Fault_Exception("Page Fault : No leaf node found.");
+        }
+        else
+        {
+          //Continue on to next level.
+          a = (pte_bytes >> 10 );
+        }
+      }
+      else
+      {
+        //Leaf node found, finished walking.
+        a = (pte_bytes >> 10 ) << 12;
+        break;
+      }
+    }
+
+    PTE_SV64_t pte(pte_bytes);
+
+    //Check RWX permissions according to access type.
+    // TODO: Clarify
+    /*
+    if ( (type == ACCESS_TYPE::FETCH) & ((pte.r == 0) | (pte.x == 0)) )
+    {
+      throw Page_Fault_Exception("Page Fault : TYPE FETCH, Incorrect permissions.");
+    }
+    else if ( (type == ACCESS_TYPE::LOAD) & (pte.r == 0) )
+    {
+      throw Page_Fault_Exception("Page Fault : TYPE LOAD, Incorrect permissions.");
+    }
+    else if ( (type == ACCESS_TYPE::STORE) & (pte.w == 0) )
+    {
+      throw Page_Fault_Exception("Page Fault : TYPE STORE, Incorrect permissions.");
+    }*/
+
+    uint64_t pfn;
+    if (i > 0)
+    {
+      //It is a super page.
+      if (pte.ppn[0] != 0)
+      {
+        //Misss aligned super page.
+        throw Page_Fault_Exception("Page Fault : Miss Aligned Super Page.");
+
+      }
+      else
+      {
+        //Valid super page.
+        pfn = pte.ppn[1];
+        *size_bits = 22;
+      }
+    }
+    else
+    {
+      //Regular page.
+      *size_bits = 12;
+      pfn = a >> 12;
+    }
+    std::cout << "translated vAddr 0x" << std::hex << vAddr_bits << " to pAddr 0x" << std::hex << pfn << "000" << std::endl;
+    return std::make_pair(pfn, pte_bytes & 0xff);
+}
+ 
 void MemoryUnit::read(void* data, uint64_t addr, uint64_t size, bool sup) {
   uint64_t pAddr = this->toPhyAddr(addr, sup ? 8 : 1);
   return decoder_.read(data, pAddr, size);
 }
 
 void MemoryUnit::write(const void* data, uint64_t addr, uint64_t size, bool sup) {
-  uint64_t pAddr = this->toPhyAddr(addr, sup ? 16 : 1);
+  uint64_t pAddr;
+  if (addr >= IO_BASE_ADDR) {
+    pAddr = addr;
+  }
+  else {
+    pAddr = this->toPhyAddr(addr, sup ? 16 : 1);
+  }
   decoder_.write(data, pAddr, size);
   amo_reservation_.valid = false;
 }

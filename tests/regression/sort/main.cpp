@@ -131,7 +131,6 @@ int main(int argc, char *argv[]) {
 
   std::cout << "dev_src=0x" << std::hex << kernel_arg.src_addr << std::endl;
   std::cout << "dev_dst=0x" << std::hex << kernel_arg.dst_addr << std::endl;
-
   // allocate host buffers
   std::cout << "allocate host buffers" << std::endl;
   std::vector<TYPE> h_src;
@@ -141,7 +140,6 @@ int main(int argc, char *argv[]) {
   // upload source buffer
   std::cout << "upload source buffer" << std::endl;
   RT_CHECK(vx_copy_to_dev(src_buffer, h_src.data(), 0, buf_size));
-
   // upload program
   std::cout << "upload program" << std::endl;
   RT_CHECK(vx_upload_kernel_file(device, kernel_file, &krnl_buffer));

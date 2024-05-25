@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <cstdint>
 #include <stdexcept>
+#include "../simx/constants.h"
 
 namespace vortex {
 enum VA_MODE
@@ -104,7 +105,7 @@ public:
     bool      notFound;
   };
 
-  MemoryUnit(uint64_t pageSize = 0);
+  MemoryUnit(uint64_t pageSize = RAM_PAGE_SIZE);
 
   void attach(MemDevice &m, uint64_t start, uint64_t end);
 
@@ -170,7 +171,8 @@ private:
   TLBEntry tlbLookup(uint64_t vAddr, uint32_t flagMask);
 
   uint64_t toPhyAddr(uint64_t vAddr, uint32_t flagMask);
-
+  std::pair<uint64_t, uint8_t> page_table_walk(uint64_t vAddr_bits, uint64_t* size_bits);
+  
   std::unordered_map<uint64_t, TLBEntry> tlb_;
   uint64_t  pageSize_;
   ADecoder  decoder_;

@@ -6,8 +6,8 @@
 void kernel_body(int task_id, kernel_arg_t *__UNIFORM__ arg)
 {
 	uint32_t num_points = arg->num_points;
-	auto src_ptr = (TYPE *)0x2040; //(TYPE*)(arg->src_addr) - 0xf0000000;
-	auto dst_ptr = (TYPE *)0x20c0; //(TYPE*)(arg->dst_addr)- 0xf0000000;
+	auto src_ptr = (TYPE *)(arg->src_addr);//0x2040; //(TYPE*)(arg->src_addr) - 0xf0000000;
+	auto dst_ptr = (TYPE *)(arg->dst_addr);//0x20c0; //(TYPE*)(arg->dst_addr)- 0xf0000000;
 
 	auto ref_value = src_ptr[task_id];
 
