@@ -155,9 +155,9 @@ public:
         }
 
         uint64_t ppn = *dev_maddr >> 12; // 4 KB pages
-        uint64_t init_pAddr = *dev_maddr; 
+        uint64_t init_pAddr = *dev_maddr;
         uint64_t init_vAddr = *dev_maddr + 0xf0000000; // vpn will change, but we want to return the vpn of the beginning of the virtual allocation
-        init_vAddr = (init_vAddr >> 12) << 12; // Shift off any page offset bits
+        init_vAddr = (init_vAddr >> 12) << 12;         // Shift off any page offset bits
         uint64_t vpn;
 
         // dev_maddr can be of size greater than a page, but we have to map and update
@@ -204,10 +204,10 @@ public:
         printf("virtual: %x\n", addr);
         printf("Page Offset: %x\n", offset);
         printf("Size: %d\n", size);
-        // CHECK_ERR(this->mem_access(addr, size, flags), {
-        //     global_mem_.release(addr);
-        //     return err;
-        // });
+        CHECK_ERR(this->mem_access(addr, size, flags), {
+            global_mem_.release(addr);
+            return err;
+        });
         *dev_addr = addr + offset;
         return 0;
     }
@@ -301,7 +301,8 @@ public:
         {
             future_.wait();
         }
-        for (auto i = addr_mapping.begin(); i != addr_mapping.end(); i++) {
+        for (auto i = addr_mapping.begin(); i != addr_mapping.end(); i++)
+        {
             std::cout << "virtual: " << std::hex << i->first << " to physical: " << std::hex << i->second << std::endl;
         }
         // set kernel info
@@ -378,13 +379,13 @@ public:
 
     void set_processor_satp(VA_MODE mode)
     {
-        uint32_t satp;
         if (mode == VA_MODE::BARE)
             this->satp = 0;
         else if (mode == VA_MODE::SV64)
         {
             this->satp = alloc_page_table();
         }
+        processor_.set_satp(this->satp);
     }
 
     uint32_t get_ptbr()
@@ -427,8 +428,8 @@ public:
             // HW: pte not initialized here
             ppn_1 = alloc_page_table();
             pte_bytes = ((ppn_1 << 10) | 0b0000000001);
-            std::cout << "pte entry: " << std::hex << pte_bytes ;
-            std::cout << std::hex << " vpn: " << vpn_1;
+            std::cout << "pte entry: " << std::hex << pte_bytes;
+            std::cout << std::hex << " vpn1: " << vpn_1;
             write_pte(pte_addr, pte_bytes);
         }
         std::cout << " --> " << std::endl
@@ -449,8 +450,8 @@ public:
             // If valid bit not set, write ppn of pAddr in PTE. Set rwx = 111 in PTE
             // to indicate this is a leaf PTE and has the stated permissions.
             pte_bytes = ((pAddr << 10) | 0b0000001111);
-            std::cout << "pte entry: " << std::hex << pte_bytes ;
-            std::cout << std::hex << " vpn: " << vpn_0;
+            std::cout << "pte entry: " << std::hex << pte_bytes;
+            std::cout << std::hex << " vpn0: " << vpn_0;
             write_pte(pte_addr, pte_bytes);
 
             // If super paging is enabled.
@@ -494,14 +495,15 @@ public:
         uint64_t pte_bytes;
 
         // Get base page table.
-        uint64_t a = this->processor_.get_satp();
+        uint64_t a = get_ptbr();
         int i = LEVELS - 1;
 
         while (true)
         {
-
             // Read PTE.
             //  HW: ram read from 1st layer page table
+            std::cout << std::hex << "a: " << a << std::endl;
+            std::cout << std::hex << "vAddr.vpn[i] * PTE_SIZE: " << vAddr.vpn[i] * PTE_SIZE << std::endl;
             ram_.read(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
 
             // pte_bytes &= 0x00000000FFFFFFFF;
@@ -573,6 +575,8 @@ public:
             *size_bits = 12;
             pfn = a >> 12;
         }
+        std::cout << "translated vAddr 0x" << std::hex << vAddr_bits << " to pAddr 0x" << std::hex << pfn << "000" << std::endl;
+
         return std::make_pair(pfn, pte_bytes & 0xff);
     }
 
@@ -849,7 +853,7 @@ extern int vx_copy_to_dev(vx_buffer_h hbuffer, const void *host_ptr, uint64_t ds
 
     if ((dst_offset + size) > buffer->size)
         return -1;
-    
+
     if (!(buffer->addr + dst_offset == STARTUP_ADDR) && !(buffer->addr + dst_offset == 0x7FFFF000))
     {
         uint64_t offset = buffer->addr % RAM_PAGE_SIZE;
@@ -860,7 +864,7 @@ extern int vx_copy_to_dev(vx_buffer_h hbuffer, const void *host_ptr, uint64_t ds
         DBGPRINT("COPY_TO_DEV: hbuffer=%p, host_addr=%p, dst_offset=%ld, size=%ld\n", hbuffer, host_ptr, dst_offset, size);
         return device->upload(phys_addr, host_ptr, size);
     }
-    
+
     DBGPRINT("COPY_TO_DEV: hbuffer=%p, host_addr=%p, dst_offset=%ld, size=%ld\n", hbuffer, host_ptr, dst_offset, size);
     return device->upload(buffer->addr, host_ptr, size);
 }

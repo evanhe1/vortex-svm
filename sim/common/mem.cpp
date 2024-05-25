@@ -179,7 +179,9 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
     {
 
       //Read PTE.
-      decoder_.read(&pte_bytes, vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
+      std::cout << std::hex << "a: " << a << std::endl;
+      std::cout << std::hex << "vAddr.vpn[i] * PTE_SIZE: " << vAddr.vpn[i] * PTE_SIZE << std::endl;
+      decoder_.read(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
       PTE_SV64_t pte(pte_bytes);
       
       //Check if it has invalid flag bits.
