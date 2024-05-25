@@ -188,9 +188,8 @@ instr_trace_t *Emulator::step()
 
   // Fetch
   uint32_t instr_code = 0;
-  // uint32_t v = 0;
-  // this->icache_read(&v, 0xf0002040, sizeof(uint32_t));
-  // std::cout << "value from src buffer: " << v << std::endl;
+  uint32_t v = 0;
+  std::cout << "new instr" << std::endl;
   this->icache_read(&instr_code, warp.PC, sizeof(uint32_t));
 
   // Decode

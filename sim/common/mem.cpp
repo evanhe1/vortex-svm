@@ -153,12 +153,14 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
   uint64_t pAddr;
   uint64_t pfn;
   uint64_t size_bits;
+  std::cout << "mem.cpp vAddr: " << addr << std::endl;
   if (enableVM_ && !(addr >= STARTUP_ADDR && addr < STARTUP_ADDR + RAM_PAGE_SIZE)) {
     // TODO: Add TLB support
     //TLBEntry t = this->tlbLookup(addr, flagMask);
     std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
     pfn = ptw_access.first;
-    pAddr = pfn << size_bits + (addr & ((1 << size_bits) - 1));
+    int offset = addr % RAM_PAGE_SIZE;
+    pAddr = (pfn << size_bits) + offset;
   } else {
     pAddr = addr;
   }
@@ -175,12 +177,14 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
     uint64_t a = this->ptbr;
     int i = LEVELS - 1; 
 
+    std::cout << "vAddr: " << vAddr_bits << std::endl;
+
     while(true)
     {
 
       //Read PTE.
-      std::cout << std::hex << "a: " << a << std::endl;
-      std::cout << std::hex << "vAddr.vpn[i] * PTE_SIZE: " << vAddr.vpn[i] * PTE_SIZE << std::endl;
+      // std::cout << std::hex << "a: " << a << std::endl;
+      // std::cout << std::hex << "vAddr.vpn[i] * PTE_SIZE: " << vAddr.vpn[i] * PTE_SIZE << std::endl;
       decoder_.read(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
       PTE_SV64_t pte(pte_bytes);
       
@@ -262,12 +266,14 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
       *size_bits = 12;
       pfn = a >> 12;
     }
-    std::cout << "translated vAddr 0x" << std::hex << vAddr_bits << " to pAddr 0x" << std::hex << pfn << "000" << std::endl;
+    // std::cout << "translated vAddr 0x" << std::hex << vAddr_bits << " to pAddr 0x" << std::hex << pfn << "000" << std::endl;
     return std::make_pair(pfn, pte_bytes & 0xff);
 }
  
 void MemoryUnit::read(void* data, uint64_t addr, uint64_t size, bool sup) {
+  std::cout << "mem.cpp vAddr: " << addr << std::endl;
   uint64_t pAddr = this->toPhyAddr(addr, sup ? 8 : 1);
+  std::cout << "mem.cpp translated pAddr: " << pAddr << std::endl;
   return decoder_.read(data, pAddr, size);
 }
 

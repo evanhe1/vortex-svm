@@ -268,6 +268,9 @@ public:
         ram_.write((const uint8_t *)src, pAddr, size);
         ram_.enable_acl(true);
 
+        uint32_t v;
+        ram_.read(&v, pAddr, sizeof(uint32_t));
+
         /*DBGPRINT("upload %ld bytes to 0x%lx\n", size, dest_addr);
         for (uint64_t i = 0; i < size && i < 1024; i += 4) {
             DBGPRINT("  0x%lx <- 0x%x\n", dest_addr + i, *(uint32_t*)((uint8_t*)src + i));
@@ -842,7 +845,6 @@ extern int vx_mem_info(vx_device_h hdevice, uint64_t *mem_free, uint64_t *mem_us
     return 0;
 }
 
-// Shouldn't need this with Virtual Memory
 extern int vx_copy_to_dev(vx_buffer_h hbuffer, const void *host_ptr, uint64_t dst_offset, uint64_t size)
 {
     if (nullptr == hbuffer || nullptr == host_ptr)
