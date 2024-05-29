@@ -226,6 +226,7 @@ public:
 
     int mem_free(uint64_t dev_addr)
     {
+        printf("freeing: %lx\n", dev_addr);
         return global_mem_.release(dev_addr);
     }
 
@@ -268,7 +269,7 @@ public:
         ram_.write((const uint8_t *)src, pAddr, size);
         ram_.enable_acl(true);
 
-        uint32_t v;
+        uint32_t v; 
         ram_.read(&v, pAddr, sizeof(uint32_t));
 
         /*DBGPRINT("upload %ld bytes to 0x%lx\n", size, dest_addr);
@@ -773,13 +774,15 @@ extern int vx_mem_free(vx_buffer_h hbuffer)
 
     uint64_t offset = buffer->addr % RAM_PAGE_SIZE;
     uint64_t size_bits;
+    printf("pre walk\n");
     std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr, &size_bits);
+    printf("post walk\n");
     uint64_t pfn = ptw_access.first;
     buffer->addr = (pfn << 12) + offset;
 
     if (0 == buffer->addr)
         return 0;
-
+        
     int err = device->mem_free(buffer->addr);
 
     delete buffer;
@@ -799,7 +802,7 @@ extern int vx_mem_access(vx_buffer_h hbuffer, uint64_t offset, uint64_t size, in
         return -1;
 
     DBGPRINT("MEM_ACCESS: hbuffer=%p, offset=%ld, size=%ld, flags=%d\n", hbuffer, offset, size, flags);
-
+    printf("Mem Address: %lx\n", buffer->addr);
     return device->mem_access(buffer->addr + offset, size, flags);
 }
 

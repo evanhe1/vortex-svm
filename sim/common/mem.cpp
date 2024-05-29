@@ -154,7 +154,8 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
   uint64_t pfn;
   uint64_t size_bits;
   std::cout << "mem.cpp vAddr: " << addr << std::endl;
-  if (enableVM_ && !(addr >= STARTUP_ADDR && addr < STARTUP_ADDR + RAM_PAGE_SIZE)) {
+  if (enableVM_ && !(addr >= STARTUP_ADDR && addr < STARTUP_ADDR + RAM_PAGE_SIZE * 2) 
+                && !(addr >= (0xfec00000))) {
     // TODO: Add TLB support
     //TLBEntry t = this->tlbLookup(addr, flagMask);
     std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
@@ -194,6 +195,7 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
       {
         printf("ptbr on fault: %lx\n", ptbr);
         printf("Fault in mem.cpp\n");
+        printf("Stack Base Addr: %lx\n", STACK_BASE_ADDR - RAM_PAGE_SIZE * 2);
         printf("Faulitng vAddr: %lx\n", vAddr_bits);
         printf("vpn level 1: %lx\n", vAddr.vpn[1]);
         printf("vpn level 0: %lx\n", vAddr.vpn[0]);
