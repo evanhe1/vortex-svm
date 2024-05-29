@@ -150,8 +150,7 @@ inline AddrType get_addr_type(uint64_t addr) {
      return AddrType::IO;
   }
   if (LMEM_ENABLED) {
-    // local mem is contiguously allocated per-thread
-    if (addr < LMEM_BASE_ADDR && (LMEM_BASE_ADDR-addr) < (1 << LMEM_LOG_SIZE) * MAX_NUM_THREADS) {
+    if (addr >= LMEM_BASE_ADDR && (addr-LMEM_BASE_ADDR) < (1 << LMEM_LOG_SIZE)) {
         return AddrType::Shared;
     }
   }
