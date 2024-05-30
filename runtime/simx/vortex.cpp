@@ -189,6 +189,41 @@ public:
         return 0;
     }
 
+    // For when virutal address is known and need to reverse physical mapping
+    int map_virtual_physical(uint64_t size, uint64_t *virt_addr)
+    {
+
+        uint64_t vpn = *virt_addr >> 12; // 4 KB pages
+        uint64_t init_vAddr = *virt_addr;
+        uint64_t init_pAddr = *virt_addr - 0xf0000000; // vpn will change, but we want to return the vpn of the beginning of the virtual allocation
+        init_pAddr = (init_pAddr >> 12) << 12;         // Shift off any page offset bits
+        uint64_t ppn;
+
+        // virt_addr can be of size greater than a page, but we have to map and update
+        // page tables on a page table granularity. So divide the allocation into pages.
+        for (vpn = (*virt_addr) >> 12; vpn < ((*virt_addr) >> 12) + (size / RAM_PAGE_SIZE) + 1; vpn++)
+        {
+            // Currently a 1-1 mapping is used, this can be changed here to support different
+            // mapping schemes
+            ppn = vpn - 0xf0000;
+            // vpn = ppn;
+
+            // If ppn to vpn mapping doesnt exist.
+            if (addr_mapping.find(vpn) == addr_mapping.end())
+            {
+                // Create mapping.
+                update_page_table(ppn, vpn);
+                addr_mapping[vpn] = ppn;
+            }
+        }
+
+        uint64_t size_bits;
+
+        *virt_addr = init_pAddr; // commit vpn to be returned to host
+
+        return 0;
+    }
+
     int mem_alloc(uint64_t size, int flags, uint64_t *dev_addr)
     {
         uint64_t addr;
@@ -214,6 +249,9 @@ public:
 
     int mem_reserve(uint64_t dev_addr, uint64_t size, int flags)
     {
+        CHECK_ERR(map_virtual_physical(size, &dev_addr), {
+            return err;
+        });
         CHECK_ERR(global_mem_.reserve(dev_addr, size), {
             return err;
         });
@@ -907,7 +945,24 @@ extern int vx_start(vx_device_h hdevice, vx_buffer_h hkernel, vx_buffer_h hargum
     auto kernel = ((vx_buffer *)hkernel);
     auto arguments = ((vx_buffer *)harguments);
 
+    vx_stack_alloc(hdevice);
     return device->start(kernel->addr, arguments->addr);
+}
+
+extern int vx_stack_alloc(vx_device_h hdevice) {
+    vx_buffer_h stack_buff = nullptr;
+    uint32_t total_threads    = NUM_CORES * NUM_WARPS * NUM_THREADS;
+    uint64_t total_stack_size = STACK_SIZE * total_threads;
+    uint64_t stack_end        = STACK_BASE_ADDR - total_stack_size;
+    // Allocate Stack Pages
+    vx_mem_reserve(hdevice, stack_end, total_stack_size, VX_MEM_READ_WRITE, &stack_buff);
+    // Write initial values
+    uint8_t *src = new uint8_t[total_stack_size];
+    for (uint64_t i = 0; i < total_stack_size; ++i)
+    {
+            src[i] = (0xbaadf00d >> (i * 8)) & 0xff;
+    }
+    return vx_copy_to_dev(stack_buff, src, 0, total_stack_size);
 }
 
 extern int vx_ready_wait(vx_device_h hdevice, uint64_t timeout)

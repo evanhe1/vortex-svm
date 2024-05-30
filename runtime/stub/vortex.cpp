@@ -61,6 +61,10 @@ extern int vx_start(vx_device_h /*hdevice*/, vx_buffer_h /*hkernel*/, vx_buffer_
     return -1;
 }
 
+extern int vx_stack_alloc(vx_device_h /*hdevice*/) {
+    return -1;
+}
+
 extern int vx_ready_wait(vx_device_h /*hdevice*/, uint64_t /*timeout*/) {
     return -1;
 }

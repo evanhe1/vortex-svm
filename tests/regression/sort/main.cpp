@@ -161,7 +161,7 @@ int main(int argc, char *argv[]) {
   RT_CHECK(vx_copy_from_dev(h_dst.data(), dst_buffer, 0, buf_size));
 
   // verify result
-  std::cout << "verify result" << std::endl;
+  std::cout << "verify result for " << std::dec << num_points << " points" << std::endl;
   int errors = 0;
   {
     std::vector<TYPE> h_ref;
