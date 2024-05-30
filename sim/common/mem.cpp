@@ -153,9 +153,12 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
   uint64_t pAddr;
   uint64_t pfn;
   uint64_t size_bits;
-  std::cout << "mem.cpp vAddr: " << addr << std::endl;
+  // std::cout << "mem.cpp vAddr: " << addr << std::endl;
+  uint32_t total_threads    = NUM_CORES * NUM_WARPS * NUM_THREADS;
+  uint64_t total_stack_size = STACK_SIZE * total_threads;
+  uint64_t stack_end        = STACK_BASE_ADDR - total_stack_size;
   if (enableVM_ && !(addr >= STARTUP_ADDR && addr < STARTUP_ADDR + RAM_PAGE_SIZE * 2) 
-                && !(addr >= (0xfec00000))) {
+                && !(addr >= stack_end)) {
     // TODO: Add TLB support
     //TLBEntry t = this->tlbLookup(addr, flagMask);
     std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
@@ -178,7 +181,7 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
     uint64_t a = this->ptbr;
     int i = LEVELS - 1; 
 
-    std::cout << "vAddr: " << vAddr_bits << std::endl;
+    // std::cout << "vAddr: " << vAddr_bits << std::endl;
 
     while(true)
     {
@@ -273,9 +276,11 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
 }
  
 void MemoryUnit::read(void* data, uint64_t addr, uint64_t size, bool sup) {
-  std::cout << "mem.cpp vAddr: " << addr << std::endl;
+  // std::cout << "mem.cpp vAddr: " << addr << std::endl;
   uint64_t pAddr = this->toPhyAddr(addr, sup ? 8 : 1);
-  std::cout << "mem.cpp translated pAddr: " << pAddr << std::endl;
+  // if (pAddr >= 0xf0000000) {
+  //   std::cout << "mem.cpp translated pAddr: " << pAddr << std::endl;
+  // }
   return decoder_.read(data, pAddr, size);
 }
 
