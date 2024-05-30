@@ -192,6 +192,11 @@ public:
     // For when virutal address is known and need to reverse physical mapping
     int map_virtual_physical(uint64_t size, uint64_t *virt_addr)
     {
+        bool skip = false;
+        if (*virt_addr == STARTUP_ADDR || *virt_addr == 0x7FFFF000)
+        {
+            skip = true;
+        }
 
         uint64_t vpn = *virt_addr >> 12; // 4 KB pages
         uint64_t init_vAddr = *virt_addr;
@@ -205,7 +210,7 @@ public:
         {
             // Currently a 1-1 mapping is used, this can be changed here to support different
             // mapping schemes
-            ppn = vpn - 0xf0000;
+            ppn = skip ? vpn : vpn - 0xf0000;
             // vpn = ppn;
 
             // If ppn to vpn mapping doesnt exist.
@@ -218,7 +223,10 @@ public:
         }
 
         uint64_t size_bits;
-
+        if (skip)
+        {
+            return 0;
+        }
         *virt_addr = init_pAddr; // commit vpn to be returned to host
 
         return 0;
@@ -897,7 +905,7 @@ extern int vx_copy_to_dev(vx_buffer_h hbuffer, const void *host_ptr, uint64_t ds
     if ((dst_offset + size) > buffer->size)
         return -1;
 
-    if (!(buffer->addr + dst_offset == STARTUP_ADDR) && !(buffer->addr + dst_offset == 0x7FFFF000))
+    if (!(buffer->addr + dst_offset == 0x7FFFF000))
     {
         uint64_t offset = buffer->addr % RAM_PAGE_SIZE;
         uint64_t size_bits;

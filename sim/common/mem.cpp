@@ -157,7 +157,7 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
   uint32_t total_threads    = NUM_CORES * NUM_WARPS * NUM_THREADS;
   uint64_t total_stack_size = STACK_SIZE * total_threads;
   uint64_t stack_end        = STACK_BASE_ADDR - total_stack_size;
-  if (enableVM_ && !(addr >= STARTUP_ADDR && addr < STARTUP_ADDR + RAM_PAGE_SIZE * 2)) {
+  if (enableVM_) {
     // TODO: Add TLB support
     //TLBEntry t = this->tlbLookup(addr, flagMask);
     std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);

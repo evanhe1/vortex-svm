@@ -175,7 +175,7 @@ extern int vx_upload_kernel_bytes(vx_device_h hdevice, const void* content, uint
     return _ret;
   });
 #else
-  RT_CHECK(vx_mem_alloc(hdevice, runtime_size, 0, &_hbuffer), {
+  RT_CHECK(vx_mem_reserve(hdevice, STARTUP_ADDR, runtime_size, 0, &_hbuffer), {
     return _ret;
   });
 #endif
