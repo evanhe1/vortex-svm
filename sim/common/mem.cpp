@@ -177,6 +177,7 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
       if (e.notFound == true) {
         std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
         pfn = ptw_access.first;
+        std::cout << "miss pfn " << pfn << std::endl;
         tlbAdd(addr, pfn << size_bits, flagMask, size_bits);
       } else {
         throw e;
@@ -326,6 +327,14 @@ bool MemoryUnit::amo_check(uint64_t addr) {
   return amo_reservation_.valid && (amo_reservation_.addr == pAddr);
 }
 void MemoryUnit::tlbAdd(uint64_t virt, uint64_t phys, uint32_t flags, uint32_t page_size) {
+  if (TLB_SIZE == 1) {
+    if (tlb_.size() == 1) {
+      tlb_.erase(tlb_.begin());
+    }
+    tlb_[virt / pageSize_] = TLBEntry(phys / pageSize_, flags, page_size);
+    return;
+  }
+  
   if (tlb_.size() == TLB_SIZE - 1)
   {
     for (auto& entry : tlb_)
@@ -347,8 +356,6 @@ void MemoryUnit::tlbAdd(uint64_t virt, uint64_t phys, uint32_t flags, uint32_t p
     }
     tlb_.erase(tlb_.find(del));
   }
-  std::cout << "virtual: " << virt << std::endl;
-  std::cout << "physical: " << phys << std::endl;
   tlb_[virt / pageSize_] = TLBEntry(phys / pageSize_, flags, page_size);
 }
 
