@@ -127,7 +127,7 @@ MemoryUnit::MemoryUnit(uint64_t pageSize)
   , enableVM_(pageSize != 0)
   , amo_reservation_({0x0, false}) {
   if (pageSize != 0) {
-    tlb_[0] = TLBEntry(0, 077);
+    tlb_[0] = TLBEntry(0, 077, RAM_PAGE_SIZE);
   }
 }
 
@@ -138,14 +138,23 @@ void MemoryUnit::attach(MemDevice &m, uint64_t start, uint64_t end) {
 MemoryUnit::TLBEntry MemoryUnit::tlbLookup(uint64_t vAddr, uint32_t flagMask) {
   auto iter = tlb_.find(vAddr / pageSize_);
   if (iter != tlb_.end()) {
-    if (iter->second.flags & flagMask)
+    if (iter->second.flags & flagMask) {
+      if (tlb_.size() == TLB_SIZE)
+      {
+        for (auto& entry : tlb_)
+        {
+          entry.second.mru = false;
+        }
+      }
+      iter->second.mru = true;
+      std::cout << "TLB hit on vAddr " << vAddr << std::endl;
       return iter->second;
-    else {
-     throw PageFault(vAddr, false);
-      
+    } else {
+     throw PageFault(vAddr, false); // protection fault
     }
   } else {
-    throw PageFault(vAddr, true);
+    std::cout << "TLB miss on vAddr " << vAddr << std::endl;
+    throw PageFault(vAddr, true); // TLB miss
   }
 }
 
@@ -159,10 +168,21 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
   uint64_t stack_end        = STACK_BASE_ADDR - total_stack_size;
   if (enableVM_) {
     // TODO: Add TLB support
-    //TLBEntry t = this->tlbLookup(addr, flagMask);
-    std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
-    pfn = ptw_access.first;
-    int offset = addr % RAM_PAGE_SIZE;
+    try {
+      TLBEntry t = this->tlbLookup(addr, flagMask);
+      pfn = t.pfn;
+      size_bits = t.page_size;
+      std::cout << "hit pfn: " << pfn << std::endl;
+    } catch (PageFault e) {
+      if (e.notFound == true) {
+        std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
+        pfn = ptw_access.first;
+        tlbAdd(addr, pfn << size_bits, flagMask, size_bits);
+      } else {
+        throw e;
+      }
+    }
+    int offset = addr % (1 << size_bits);
     pAddr = (pfn << size_bits) + offset;
   } else {
     pAddr = addr;
@@ -305,8 +325,31 @@ bool MemoryUnit::amo_check(uint64_t addr) {
   uint64_t pAddr = this->toPhyAddr(addr, 1);
   return amo_reservation_.valid && (amo_reservation_.addr == pAddr);
 }
-void MemoryUnit::tlbAdd(uint64_t virt, uint64_t phys, uint32_t flags) {
-  tlb_[virt / pageSize_] = TLBEntry(phys / pageSize_, flags);
+void MemoryUnit::tlbAdd(uint64_t virt, uint64_t phys, uint32_t flags, uint32_t page_size) {
+  if (tlb_.size() == TLB_SIZE - 1)
+  {
+    for (auto& entry : tlb_)
+    {
+      entry.second.mru = false;
+    }
+    
+  }
+  else if (tlb_.size() == TLB_SIZE)
+  {
+    uint64_t del;
+    for (auto entry : tlb_) // mru bit for pseudo-LRU replacement
+    {
+      if (!entry.second.mru)
+      {
+        del = entry.first;
+        break;
+      }
+    }
+    tlb_.erase(tlb_.find(del));
+  }
+  std::cout << "virtual: " << virt << std::endl;
+  std::cout << "physical: " << phys << std::endl;
+  tlb_[virt / pageSize_] = TLBEntry(phys / pageSize_, flags, page_size);
 }
 
 void MemoryUnit::tlbRm(uint64_t va) {

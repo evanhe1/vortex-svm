@@ -115,7 +115,7 @@ public:
   void amo_reserve(uint64_t addr);
   bool amo_check(uint64_t addr);
 
-  void tlbAdd(uint64_t virt, uint64_t phys, uint32_t flags);
+  void tlbAdd(uint64_t virt, uint64_t phys, uint32_t flags, uint32_t page_size);
   void tlbRm(uint64_t vaddr);
   void tlbFlush() {
     tlb_.clear();
@@ -160,12 +160,16 @@ private:
 
   struct TLBEntry {
     TLBEntry() {}
-    TLBEntry(uint32_t pfn, uint32_t flags)
+    TLBEntry(uint32_t pfn, uint32_t flags, uint32_t page_size)
       : pfn(pfn)
       , flags(flags)
+      , page_size(page_size)
+      , mru(0)
     {}
     uint32_t pfn;
     uint32_t flags;
+    uint32_t page_size;
+    bool mru;
   };
 
   TLBEntry tlbLookup(uint64_t vAddr, uint32_t flagMask);
