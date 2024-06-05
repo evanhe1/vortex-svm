@@ -70,13 +70,16 @@ class vx_device
 {
 public:
     vx_device()
-        : arch_(NUM_THREADS, NUM_WARPS, NUM_CORES), ram_(0, RAM_PAGE_SIZE), processor_(arch_), global_mem_(ALLOC_BASE_ADDR, GLOBAL_MEM_SIZE - ALLOC_BASE_ADDR, RAM_PAGE_SIZE, CACHE_BLOCK_SIZE)
+        : arch_(NUM_THREADS, NUM_WARPS, NUM_CORES), ram_(0, RAM_PAGE_SIZE), processor_(arch_), global_mem_(ALLOC_BASE_ADDR, GLOBAL_MEM_SIZE - ALLOC_BASE_ADDR, RAM_PAGE_SIZE, CACHE_BLOCK_SIZE), virtual_allocator_(ALLOC_BASE_ADDR, GLOBAL_MEM_SIZE - ALLOC_BASE_ADDR, RAM_PAGE_SIZE, CACHE_BLOCK_SIZE)
     {
         // attach memory module
         processor_.attach_ram(&ram_);
 
         // Sets more
         set_processor_satp(VM_ADDR_MODE);
+
+        // reservation to avoid tlb collision with amo_reservation entry
+        virtual_allocator_.reserve(ALLOC_BASE_ADDR, 3 * RAM_PAGE_SIZE);
     }
 
     ~vx_device()
@@ -156,9 +159,12 @@ public:
 
         uint64_t ppn = *dev_maddr >> 12; // 4 KB pages
         uint64_t init_pAddr = *dev_maddr;
-        uint64_t init_vAddr = *dev_maddr + 0xf0000000; // vpn will change, but we want to return the vpn of the beginning of the virtual allocation
-        init_vAddr = (init_vAddr >> 12) << 12;         // Shift off any page offset bits
+
+        // uint64_t init_vAddr = *dev_maddr + 0xf0000000; // vpn will change, but we want to return the vpn of the beginning of the virtual allocation
+        // init_vAddr = (init_vAddr >> 12) << 12;         // Shift off any page offset bits
+        uint64_t init_vAddr;
         uint64_t vpn;
+        bool init_addr_set = false;
 
         // dev_maddr can be of size greater than a page, but we have to map and update
         // page tables on a page table granularity. So divide the allocation into pages.
@@ -166,12 +172,27 @@ public:
         {
             // Currently a 1-1 mapping is used, this can be changed here to support different
             // mapping schemes
-            vpn = skip ? ppn : ppn + 0xf0000;
+            if (!skip) {
+                uint64_t vAddr;
+                std::cout << "alloc size: " << size << std::endl;
+                virtual_allocator_.allocate(std::min((uint64_t)RAM_PAGE_SIZE, size % RAM_PAGE_SIZE), &vAddr);
+                std::cout << "alloced vpn: " << (vAddr >> 12) << std::endl;
+                vpn = vAddr >> 12;
+                if (!init_addr_set) {
+                    init_vAddr = vpn << 12;
+                    init_addr_set = true;
+                }
+            } else {
+                vpn = ppn;
+            }
+
+            // vpn = skip ? ppn : ppn + 0xf0000;
             // vpn = ppn;
 
             // If ppn to vpn mapping doesnt exist.
             if (addr_mapping.find(vpn) == addr_mapping.end())
             {
+                std::cout << "creating mapping vpn " << vpn << " to ppn " << ppn << std::endl;
                 // Create mapping.
                 update_page_table(ppn, vpn);
                 addr_mapping[vpn] = ppn;
@@ -240,14 +261,15 @@ public:
         });
         printf("physical: %x\n", addr);
         uint64_t offset = addr % RAM_PAGE_SIZE;
-        uint64_t temp_addr = addr;
         CHECK_ERR(map_local_mem(size, &addr), {
             return err;
         });
         printf("virtual: %x\n", addr);
         printf("Page Offset: %x\n", offset);
         printf("Size: %d\n", size);
-        CHECK_ERR(this->mem_access(addr, size, flags), {
+        std::cout << "mem alloc flags: " << flags << std::endl;
+        std::cout << "mem alloc size: " << size << std::endl;
+        CHECK_ERR(this->mem_access(addr + offset, size, flags), {
             global_mem_.release(addr);
             return err;
         });
@@ -278,6 +300,7 @@ public:
 
     int mem_access(uint64_t dev_addr, uint64_t size, int flags)
     {
+        std::cout << "mem_access setting addr: " << dev_addr << std::endl;
         uint64_t asize = aligned_size(size, CACHE_BLOCK_SIZE);
         if (dev_addr + asize > GLOBAL_MEM_SIZE)
             return -1;
@@ -668,6 +691,7 @@ public:
             //(value >> ((i & 0x3) * 8)) & 0xff;
             src[i] = (value >> (i * 8)) & 0xff;
         }
+        std::cout << "pte write dest: " << addr << std::endl;
         ram_.write((const uint8_t *)src, addr, PTE_SIZE);
     }
 
@@ -683,6 +707,7 @@ private:
     RAM ram_;
     Processor processor_;
     MemoryAllocator global_mem_;
+    MemoryAllocator virtual_allocator_;
     DeviceConfig dcrs_;
     std::future<void> future_;
     std::unordered_map<uint64_t, uint64_t> addr_mapping;

@@ -147,13 +147,13 @@ MemoryUnit::TLBEntry MemoryUnit::tlbLookup(uint64_t vAddr, uint32_t flagMask) {
         }
       }
       iter->second.mru = true;
-      std::cout << "TLB hit on vAddr " << vAddr << std::endl;
+      // std::cout << "TLB hit on vAddr " << vAddr << std::endl;
       return iter->second;
     } else {
      throw PageFault(vAddr, false); // protection fault
     }
   } else {
-    std::cout << "TLB miss on vAddr " << vAddr << std::endl;
+    // std::cout << "TLB miss on vAddr " << vAddr << std::endl;
     throw PageFault(vAddr, true); // TLB miss
   }
 }
@@ -172,12 +172,12 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
       TLBEntry t = this->tlbLookup(addr, flagMask);
       pfn = t.pfn;
       size_bits = t.page_size;
-      std::cout << "hit pfn: " << pfn << std::endl;
+      // std::cout << "hit pfn: " << pfn << std::endl;
     } catch (PageFault e) {
       if (e.notFound == true) {
         std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
         pfn = ptw_access.first;
-        std::cout << "miss pfn " << pfn << std::endl;
+        // std::cout << "miss pfn " << pfn << std::endl;
         tlbAdd(addr, pfn << size_bits, flagMask, size_bits);
       } else {
         throw e;
@@ -296,11 +296,7 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
 }
  
 void MemoryUnit::read(void* data, uint64_t addr, uint64_t size, bool sup) {
-  // std::cout << "mem.cpp vAddr: " << addr << std::endl;
   uint64_t pAddr = this->toPhyAddr(addr, sup ? 8 : 1);
-  // if (pAddr >= 0xf0000000) {
-  //   std::cout << "mem.cpp translated pAddr: " << pAddr << std::endl;
-  // }
   return decoder_.read(data, pAddr, size);
 }
 
@@ -502,6 +498,7 @@ uint8_t *RAM::get(uint64_t address) const {
 
 void RAM::read(void* data, uint64_t addr, uint64_t size) {
   if (check_acl_ && acl_mngr_.check(addr, size, 0x1) == false) {
+    std::cout << "RAM::read failed" << std::endl; 
     throw BadAddress();
   }
   uint8_t* d = (uint8_t*)data;
@@ -512,6 +509,7 @@ void RAM::read(void* data, uint64_t addr, uint64_t size) {
 
 void RAM::write(const void* data, uint64_t addr, uint64_t size) {
   if (check_acl_ && acl_mngr_.check(addr, size, 0x2) == false) {
+    std::cout << "RAM::write failed" << std::endl; 
     throw BadAddress();
   }
   const uint8_t* d = (const uint8_t*)data;
