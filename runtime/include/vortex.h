@@ -63,6 +63,8 @@ typedef void* vx_buffer_h;
 #define VX_MEM_READ                 0x1
 #define VX_MEM_WRITE                0x2
 #define VX_MEM_READ_WRITE           0x3
+// device page status
+#define VX_PAGE_VALID_ABSENT        0x47
 
 // open the device and connect to it
 int vx_dev_open(vx_device_h* hdevice);

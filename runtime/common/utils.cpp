@@ -171,11 +171,11 @@ extern int vx_upload_kernel_bytes(vx_device_h hdevice, const void* content, uint
 
   vx_buffer_h _hbuffer;
 #ifndef NDEBUG
-  RT_CHECK(vx_mem_reserve(hdevice, min_vma, runtime_size, 0, &_hbuffer), {
+  RT_CHECK(vx_mem_reserve(hdevice, STARTUP_ADDR, runtime_size, 0, &_hbuffer), {
     return _ret;
   });
 #else
-  RT_CHECK(vx_mem_reserve(hdevice, STARTUP_ADDR, runtime_size, 0, &_hbuffer), {
+  RT_CHECK(vx_mem_alloc(hdevice, runtime_size, 0, &_hbuffer), {
     return _ret;
   });
 #endif
@@ -244,25 +244,6 @@ extern int vx_upload_bytes(vx_device_h hdevice, const void* content, uint64_t si
 
   *hbuffer = _hbuffer;
 
-  /*
-  // allocate two pages on the stack 
-  // TODO: Need based
-  RT_CHECK(vx_mem_alloc(hdevice, RAM_PAGE_SIZE * 2, VX_MEM_READ_WRITE, &_hbuffer), {
-    return _ret;
-  });
-
-  uint64_t stack_addr = 0xfeffe000;
-  uint8_t *blank_pages = new uint8_t[RAM_PAGE_SIZE * 2];
-  for (uint64_t i = 0; i < RAM_PAGE_SIZE * 2 ; ++i)
-  {
-    blank_pages[i] = (0x00000000 >> ((i & 0x3) * 8)) & 0xff;
-  }
-
-  RT_CHECK(vx_copy_to_dev(_hbuffer, blank_pages, 0, RAM_PAGE_SIZE * 2), {
-    vx_mem_free(_hbuffer);
-    _ret;
-  });
-  */
   return 0;
 }
 

@@ -240,15 +240,17 @@ public:
         });
         printf("physical: %x\n", addr);
         uint64_t offset = addr % RAM_PAGE_SIZE;
-        uint64_t temp_addr = addr;
+        uint64_t phys_addr = addr;
         CHECK_ERR(map_local_mem(size, &addr), {
             return err;
         });
         printf("virtual: %x\n", addr);
         printf("Page Offset: %x\n", offset);
         printf("Size: %d\n", size);
-        CHECK_ERR(this->mem_access(addr, size, flags), {
-            global_mem_.release(addr);
+        std::cout << "mem alloc flags: " << flags << std::endl;
+        std::cout << "mem alloc size: " << size << std::endl;
+        CHECK_ERR(this->mem_access(phys_addr, size, flags), {
+            global_mem_.release(phys_addr);
             return err;
         });
         *dev_addr = addr + offset;
@@ -257,16 +259,17 @@ public:
 
     int mem_reserve(uint64_t dev_addr, uint64_t size, int flags)
     {
-        CHECK_ERR(map_virtual_physical(size, &dev_addr), {
+        std::cout << std::hex << "address: " << dev_addr << " size: " << size <<  std::endl;
+        CHECK_ERR(virtual_allocator_.reserve(dev_addr, size), {
             return err;
         });
-        CHECK_ERR(global_mem_.reserve(dev_addr, size), {
-            return err;
-        });
-        CHECK_ERR(this->mem_access(dev_addr, size, flags), {
-            global_mem_.release(dev_addr);
-            return err;
-        });
+        for (uint64_t vpn = dev_addr >> 12; vpn < (dev_addr >> 12) + (size / RAM_PAGE_SIZE) + 1; vpn++) {
+            std::cout << "setting flags for vpn: " << std::hex << vpn << std::endl;
+            CHECK_ERR(this->set_pte_flag((vpn << 12) | 0x000, flags), {
+                virtual_allocator_.release(vpn);
+                return err;
+            });
+        }
         return 0;
     }
 
@@ -548,6 +551,7 @@ public:
         uint64_t a = get_ptbr();
         int i = LEVELS - 1;
 
+        std::cout << std::hex << "page table walk for: " << vAddr_bits << std::endl;
         while (true)
         {
             // Read PTE.
@@ -630,6 +634,60 @@ public:
         return std::make_pair(pfn, pte_bytes & 0xff);
     }
 
+    // Find page table entry for a given virtual address and update flag value
+    int set_pte_flag(uint64_t vAddr_bits, uint8_t flag_mask) {
+
+        uint64_t LEVELS = 2;
+        vAddr_SV64_t vAddr(vAddr_bits);
+        uint64_t pte_bytes;
+        uint64_t pte_addr;
+
+        // Get base page table.
+        uint64_t a = get_ptbr();
+        int i = LEVELS - 1;
+
+        while (true)
+        {
+            // Read PTE.
+            pte_addr = a + vAddr.vpn[i] * PTE_SIZE;
+            pte_bytes = read_pte(pte_addr);
+            // pte_bytes &= 0x00000000FFFFFFFF;
+            PTE_SV64_t pte(pte_bytes);
+
+            // HW: this line tells if we're still looking for metadata or the final PTE
+            if (i != 0 & ((pte.r == 0) & (pte.w == 0) & (pte.x == 0)))
+            {
+                // Not a leaf node as rwx == 000
+                i--;
+                // Need to allocate second level page table
+                if (pte.v == 0) {
+                    std::cout << "allocating unmapped pte" << std::endl;
+                    uint64_t ppn_1 = alloc_page_table();
+                    pte_bytes = ((ppn_1 << 10) | 0b0000000001);
+                    write_pte(pte_addr, pte_bytes);
+                }
+                // Continue on to next level.
+                //  shift off bottom 10 bits (status, offset, etc)
+                a = (pte_bytes >> 10);
+            }
+            else
+            {
+                // Leaf node found, finished walking.
+                //  actual physical addr found
+                a = (pte_bytes >> 10) << 12;
+                break;
+            }
+        }
+
+
+        pte_bytes = (pte_bytes >> 8) << 8; // shift off status flags
+        pte_bytes |= (flag_mask & 0xff); // Set new flag values
+        std::cout << "old pte: " << std::hex << read_pte(pte_addr) << std::endl; 
+        write_pte(pte_addr, pte_bytes);
+        std::cout << "new pte: " << std::hex << read_pte(pte_addr) << std::endl; 
+        return 0;
+    }
+
     uint64_t alloc_page_table()
     {
         uint64_t addr;
@@ -668,7 +726,10 @@ public:
             //(value >> ((i & 0x3) * 8)) & 0xff;
             src[i] = (value >> (i * 8)) & 0xff;
         }
+        std::cout << "pte write dest: " << addr << std::endl;
+        ram_.enable_acl(false);
         ram_.write((const uint8_t *)src, addr, PTE_SIZE);
+        ram_.enable_acl(true);
     }
 
     uint64_t read_pte(uint64_t addr)
@@ -958,19 +1019,16 @@ extern int vx_start(vx_device_h hdevice, vx_buffer_h hkernel, vx_buffer_h hargum
 }
 
 extern int vx_stack_alloc(vx_device_h hdevice) {
+    std::cout << "stack allocation: " << std::endl;
     vx_buffer_h stack_buff = nullptr;
     uint32_t total_threads    = NUM_CORES * NUM_WARPS * NUM_THREADS;
     uint64_t total_stack_size = STACK_SIZE * total_threads;
     uint64_t stack_end        = STACK_BASE_ADDR - total_stack_size;
-    // Allocate Stack Pages
-    vx_mem_reserve(hdevice, stack_end, total_stack_size, VX_MEM_READ_WRITE, &stack_buff);
-    // Write initial values
-    uint8_t *src = new uint8_t[total_stack_size];
-    for (uint64_t i = 0; i < total_stack_size; ++i)
-    {
-            src[i] = (0xbaadf00d >> (i * 8)) & 0xff;
-    }
-    return vx_copy_to_dev(stack_buff, src, 0, total_stack_size);
+    // Reserve Stack Pages
+    CHECK_ERR(vx_mem_reserve(hdevice, stack_end, total_stack_size, VX_PAGE_VALID_ABSENT, &stack_buff), {
+        return err;
+    });
+    return 0;
 }
 
 extern int vx_ready_wait(vx_device_h hdevice, uint64_t timeout)

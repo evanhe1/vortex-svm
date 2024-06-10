@@ -231,7 +231,11 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
 
     PTE_SV64_t pte(pte_bytes);
 
-    //Check RWX permissions according to access type.
+    // Check if page is absent and valid
+    std::cout << "pte: " << std::hex << pte_bytes << std::endl;
+    if ((pte.a == 1) && (pte.v == 1)) {
+      std::cout << "valid but absent" << std::endl;
+    }
     // TODO: Clarify
     /*
     if ( (type == ACCESS_TYPE::FETCH) & ((pte.r == 0) | (pte.x == 0)) )
