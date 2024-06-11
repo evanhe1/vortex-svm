@@ -40,6 +40,8 @@ public:
 
   void attach_ram(RAM* ram);
 
+  void set_global_allocator(MemoryAllocator* alloc);
+
   instr_trace_t* step();
 
   bool running() const;

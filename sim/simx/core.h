@@ -97,6 +97,8 @@ public:
 
   void attach_ram(RAM* ram);
 
+  void set_global_allocator(MemoryAllocator* alloc);
+
   bool running() const;
 
   void resume(uint32_t wid);

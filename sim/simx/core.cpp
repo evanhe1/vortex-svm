@@ -404,6 +404,10 @@ void Core::attach_ram(RAM* ram) {
   emulator_.attach_ram(ram);
 }
 
+void Core::set_global_allocator(MemoryAllocator* alloc) {
+  emulator_.set_global_allocator(alloc);
+}
+
 void Core::set_csr(uint32_t addr, uint32_t value, uint32_t tid, uint32_t wid) {
   __unused (tid);
   switch (addr) {

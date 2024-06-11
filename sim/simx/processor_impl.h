@@ -40,6 +40,7 @@ public:
   void dcr_write(uint32_t addr, uint32_t value);
 
   void set_core_satp(uint32_t satp);
+  void set_global_allocator(MemoryAllocator* alloc);
 
   PerfStats perf_stats() const;
 

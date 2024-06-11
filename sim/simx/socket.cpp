@@ -107,6 +107,12 @@ void Socket::attach_ram(RAM* ram) {
   }
 }
 
+void Socket::set_global_allocator(MemoryAllocator* alloc) {
+  for (auto core : cores_) {
+    core->set_global_allocator(alloc);
+  }
+}
+
 bool Socket::running() const {
   for (auto& core : cores_) {
     if (core->running())

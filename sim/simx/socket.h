@@ -60,6 +60,8 @@ public:
 
   void attach_ram(RAM* ram);
 
+  void set_global_allocator(MemoryAllocator* alloc);
+  
   bool running() const;
 
   int get_exitcode() const;  

@@ -136,6 +136,10 @@ void Emulator::attach_ram(RAM *ram)
 #endif
 }
 
+void Emulator::set_global_allocator(MemoryAllocator* alloc) {
+  mmu_.set_global_allocator(alloc);
+}
+
 instr_trace_t *Emulator::step()
 {
   int scheduled_warp = -1;

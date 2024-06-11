@@ -21,6 +21,16 @@
 
 using namespace vortex;
 
+#define CHECK_ERR(_expr, _cleanup)                                      \
+    do                                                                  \
+    {                                                                   \
+        auto err = _expr;                                               \
+        if (err == 0)                                                   \
+            break;                                                      \
+        printf("[VXDRV] Error: '%s' returned %d!\n", #_expr, (int)err); \
+        _cleanup                                                        \
+    } while (false)
+
 RamMemDevice::RamMemDevice(const char *filename, uint32_t wordSize)
   : wordSize_(wordSize) {
   std::ifstream input(filename);
@@ -127,7 +137,7 @@ MemoryUnit::MemoryUnit(uint64_t pageSize)
   , enableVM_(pageSize != 0)
   , amo_reservation_({0x0, false}) {
   if (pageSize != 0) {
-    tlb_[0] = TLBEntry(0, 077);
+    tlb_[0] = TLBEntry(0, 077, RAM_PAGE_SIZE);
   }
 }
 
@@ -135,17 +145,30 @@ void MemoryUnit::attach(MemDevice &m, uint64_t start, uint64_t end) {
   decoder_.map(start, end, m);
 }
 
+void MemoryUnit::set_global_allocator(MemoryAllocator* alloc) {
+  global_mem_ = alloc;
+}
+
 MemoryUnit::TLBEntry MemoryUnit::tlbLookup(uint64_t vAddr, uint32_t flagMask) {
   auto iter = tlb_.find(vAddr / pageSize_);
   if (iter != tlb_.end()) {
-    if (iter->second.flags & flagMask)
+    if (iter->second.flags & flagMask) {
+      if (tlb_.size() == TLB_SIZE)
+      {
+        for (auto& entry : tlb_)
+        {
+          entry.second.mru = false;
+        }
+      }
+      iter->second.mru = true;
+      // std::cout << "TLB hit on vAddr " << vAddr << std::endl;
       return iter->second;
-    else {
-     throw PageFault(vAddr, false);
-      
+    } else {
+     throw PageFault(vAddr, false); // protection fault
     }
   } else {
-    throw PageFault(vAddr, true);
+    // std::cout << "TLB miss on vAddr " << vAddr << std::endl;
+    throw PageFault(vAddr, true); // TLB miss
   }
 }
 
@@ -159,10 +182,22 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
   uint64_t stack_end        = STACK_BASE_ADDR - total_stack_size;
   if (enableVM_) {
     // TODO: Add TLB support
-    //TLBEntry t = this->tlbLookup(addr, flagMask);
-    std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
-    pfn = ptw_access.first;
-    int offset = addr % RAM_PAGE_SIZE;
+    try {
+      TLBEntry t = this->tlbLookup(addr, flagMask);
+      pfn = t.pfn;
+      size_bits = t.page_size;
+      // std::cout << "hit pfn: " << pfn << std::endl;
+    } catch (PageFault e) {
+      if (e.notFound == true) {
+        std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
+        pfn = ptw_access.first;
+        // std::cout << "miss pfn " << pfn << std::endl;
+        tlbAdd(addr, pfn << size_bits, flagMask, size_bits);
+      } else {
+        throw e;
+      }
+    }
+    int offset = addr % (1 << size_bits);
     pAddr = (pfn << size_bits) + offset;
   } else {
     pAddr = addr;
@@ -232,9 +267,17 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
     PTE_SV64_t pte(pte_bytes);
 
     // Check if page is absent and valid
-    std::cout << "pte: " << std::hex << pte_bytes << std::endl;
+    // TODO: fix
     if ((pte.a == 1) && (pte.v == 1)) {
-      std::cout << "valid but absent" << std::endl;
+      std::cout << "pte before: " << std::hex << pte_bytes << std::endl;
+        uint64_t addr;
+        CHECK_ERR((global_mem_->allocate(RAM_PAGE_SIZE, &addr)), {
+            printf("%d\n", err);
+        });
+        uint64_t ppn = (addr >> 12) << 20;
+        pte_bytes = ppn | 0x07; // rwv
+        decoder_.write(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
+        std::cout << "pte after: " << std::hex << pte_bytes << std::endl;
     }
     // TODO: Clarify
     /*
@@ -279,11 +322,7 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
 }
  
 void MemoryUnit::read(void* data, uint64_t addr, uint64_t size, bool sup) {
-  // std::cout << "mem.cpp vAddr: " << addr << std::endl;
   uint64_t pAddr = this->toPhyAddr(addr, sup ? 8 : 1);
-  // if (pAddr >= 0xf0000000) {
-  //   std::cout << "mem.cpp translated pAddr: " << pAddr << std::endl;
-  // }
   return decoder_.read(data, pAddr, size);
 }
 
@@ -309,8 +348,37 @@ bool MemoryUnit::amo_check(uint64_t addr) {
   uint64_t pAddr = this->toPhyAddr(addr, 1);
   return amo_reservation_.valid && (amo_reservation_.addr == pAddr);
 }
-void MemoryUnit::tlbAdd(uint64_t virt, uint64_t phys, uint32_t flags) {
-  tlb_[virt / pageSize_] = TLBEntry(phys / pageSize_, flags);
+void MemoryUnit::tlbAdd(uint64_t virt, uint64_t phys, uint32_t flags, uint32_t page_size) {
+  if (TLB_SIZE == 1) {
+    if (tlb_.size() == 1) {
+      tlb_.erase(tlb_.begin());
+    }
+    tlb_[virt / pageSize_] = TLBEntry(phys / pageSize_, flags, page_size);
+    return;
+  }
+  
+  if (tlb_.size() == TLB_SIZE - 1)
+  {
+    for (auto& entry : tlb_)
+    {
+      entry.second.mru = false;
+    }
+    
+  }
+  else if (tlb_.size() == TLB_SIZE)
+  {
+    uint64_t del;
+    for (auto entry : tlb_) // mru bit for pseudo-LRU replacement
+    {
+      if (!entry.second.mru)
+      {
+        del = entry.first;
+        break;
+      }
+    }
+    tlb_.erase(tlb_.find(del));
+  }
+  tlb_[virt / pageSize_] = TLBEntry(phys / pageSize_, flags, page_size);
 }
 
 void MemoryUnit::tlbRm(uint64_t va) {
@@ -456,6 +524,7 @@ uint8_t *RAM::get(uint64_t address) const {
 
 void RAM::read(void* data, uint64_t addr, uint64_t size) {
   if (check_acl_ && acl_mngr_.check(addr, size, 0x1) == false) {
+    std::cout << "RAM::read failed" << std::endl; 
     throw BadAddress();
   }
   uint8_t* d = (uint8_t*)data;
@@ -466,6 +535,7 @@ void RAM::read(void* data, uint64_t addr, uint64_t size) {
 
 void RAM::write(const void* data, uint64_t addr, uint64_t size) {
   if (check_acl_ && acl_mngr_.check(addr, size, 0x2) == false) {
+    std::cout << "RAM::write failed" << std::endl; 
     throw BadAddress();
   }
   const uint8_t* d = (const uint8_t*)data;

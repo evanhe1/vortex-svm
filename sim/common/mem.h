@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include "../simx/constants.h"
+#include "../../runtime/common/malloc.h"
 
 namespace vortex {
 enum VA_MODE
@@ -115,7 +116,7 @@ public:
   void amo_reserve(uint64_t addr);
   bool amo_check(uint64_t addr);
 
-  void tlbAdd(uint64_t virt, uint64_t phys, uint32_t flags);
+  void tlbAdd(uint64_t virt, uint64_t phys, uint32_t flags, uint32_t page_size);
   void tlbRm(uint64_t vaddr);
   void tlbFlush() {
     tlb_.clear();
@@ -123,6 +124,7 @@ public:
 
   uint32_t get_satp();  
   void set_satp(uint32_t satp);
+  void set_global_allocator(MemoryAllocator* alloc);
 
 private:
 
@@ -160,12 +162,16 @@ private:
 
   struct TLBEntry {
     TLBEntry() {}
-    TLBEntry(uint32_t pfn, uint32_t flags)
+    TLBEntry(uint32_t pfn, uint32_t flags, uint32_t page_size)
       : pfn(pfn)
       , flags(flags)
+      , page_size(page_size)
+      , mru(0)
     {}
     uint32_t pfn;
     uint32_t flags;
+    uint32_t page_size;
+    bool mru;
   };
 
   TLBEntry tlbLookup(uint64_t vAddr, uint32_t flagMask);
@@ -183,6 +189,8 @@ private:
   uint32_t ptbr;
 
   amo_reservation_t amo_reservation_;
+
+  MemoryAllocator* global_mem_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

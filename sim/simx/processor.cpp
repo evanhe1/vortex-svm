@@ -84,6 +84,12 @@ void ProcessorImpl::attach_ram(RAM* ram) {
   }
 }
 
+void ProcessorImpl::set_global_allocator(MemoryAllocator* alloc) {
+  for (auto cluster : clusters_) {
+    cluster->set_global_allocator(alloc);
+  }
+}
+
 int ProcessorImpl::run() {
   SimPlatform::instance().reset();
   this->reset();
@@ -166,4 +172,8 @@ void Processor::set_satp(uint32_t satp) {
   this->satp = satp;
   std::cout << "set SATP: 0x" << std::hex << this->satp << std::endl;
   impl_->set_core_satp(satp);
+}
+
+void Processor::set_global_allocator(MemoryAllocator* alloc) {
+  impl_->set_global_allocator(alloc);
 }

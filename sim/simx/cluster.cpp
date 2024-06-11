@@ -106,6 +106,12 @@ void Cluster::attach_ram(RAM* ram) {
   }
 }
 
+void Cluster::set_global_allocator(MemoryAllocator* alloc) {
+  for (auto& socket : sockets_) {
+    socket->set_global_allocator(alloc);
+  }
+}
+
 bool Cluster::running() const {
   for (auto& socket : sockets_) {
     if (socket->running())

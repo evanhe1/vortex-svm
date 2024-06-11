@@ -20,6 +20,7 @@ namespace vortex {
 class Arch;
 class RAM;
 class ProcessorImpl;
+class MemoryAllocator;
 
 class Processor {
 public:
@@ -34,6 +35,7 @@ public:
 
   uint32_t get_satp();
   void set_satp(uint32_t satp);
+  void set_global_allocator(MemoryAllocator* alloc);
 
 private:
   ProcessorImpl* impl_;
