@@ -186,12 +186,12 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
       TLBEntry t = this->tlbLookup(addr, flagMask);
       pfn = t.pfn;
       size_bits = t.page_size;
-      // std::cout << "hit pfn: " << pfn << std::endl;
+      std::cout << "hit pfn: " << pfn << std::endl;
     } catch (PageFault e) {
       if (e.notFound == true) {
         std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
         pfn = ptw_access.first;
-        // std::cout << "miss pfn " << pfn << std::endl;
+        std::cout << "miss pfn " << pfn << std::endl;
         tlbAdd(addr, pfn << size_bits, flagMask, size_bits);
       } else {
         throw e;
@@ -269,7 +269,7 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
     // Check if page is absent and valid
     // TODO: fix
     if ((pte.a == 1) && (pte.v == 1)) {
-      std::cout << "pte before: " << std::hex << pte_bytes << std::endl;
+       // std::cout << "pte before: " << std::hex << pte_bytes << std::endl;
         uint64_t addr;
         CHECK_ERR((global_mem_->allocate(RAM_PAGE_SIZE, &addr)), {
             printf("%d\n", err);
@@ -277,7 +277,12 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
         uint64_t ppn = (addr >> 12) << 20;
         pte_bytes = ppn | 0x07; // rwv
         decoder_.write(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
-        std::cout << "pte after: " << std::hex << pte_bytes << std::endl;
+        //std::cout << "pte after: " << std::hex << pte_bytes << std::endl;
+        PTE_SV64_t pte_new(pte_bytes);
+        pte = pte_new;
+        //std::cout << "pfn: " << pte.ppn[1] << std::endl;
+        //std::cout << "i: " << i << std::endl;
+        a = (pte_bytes >> 10 ) << 12;
     }
     // TODO: Clarify
     /*
@@ -317,11 +322,12 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
       *size_bits = 12;
       pfn = a >> 12;
     }
-    // std::cout << "translated vAddr 0x" << std::hex << vAddr_bits << " to pAddr 0x" << std::hex << pfn << "000" << std::endl;
+    std::cout << "translated vAddr 0x" << std::hex << vAddr_bits << " to pAddr 0x" << std::hex << pfn << "000" << std::endl;
     return std::make_pair(pfn, pte_bytes & 0xff);
 }
  
 void MemoryUnit::read(void* data, uint64_t addr, uint64_t size, bool sup) {
+  printf("Reading addr: %lx\n", addr);
   uint64_t pAddr = this->toPhyAddr(addr, sup ? 8 : 1);
   return decoder_.read(data, pAddr, size);
 }

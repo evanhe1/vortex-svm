@@ -176,9 +176,8 @@ public:
             // mapping schemes
             if (!skip) {
                 uint64_t vAddr;
-                std::cout << "alloc size: " << size << std::endl;
-                virtual_allocator_.allocate(std::min((uint64_t)RAM_PAGE_SIZE, size % RAM_PAGE_SIZE), &vAddr);
-                std::cout << "alloced vpn: " << (vAddr >> 12) << std::endl;
+                virtual_allocator_.allocate((RAM_PAGE_SIZE), &vAddr);
+                std::cout << "allocated vpn: " << (vAddr >> 12) << std::endl;
                 vpn = vAddr >> 12;
                 if (!init_addr_set) {
                     init_vAddr = vpn << 12;
