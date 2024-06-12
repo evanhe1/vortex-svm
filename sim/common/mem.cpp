@@ -183,7 +183,7 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
       TLBEntry t = this->tlbLookup(addr, flagMask);
       pfn = t.pfn;
       size_bits = t.page_size;
-      std::cout << "hit pfn: " << pfn << std::endl;
+      //std::cout << "hit pfn: " << pfn << std::endl;
     } catch (PageFault e) {
       if (e.notFound == true) {
         std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
@@ -329,7 +329,6 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
 }
  
 void MemoryUnit::read(void* data, uint64_t addr, uint64_t size, bool sup) {
-  printf("Reading addr: %lx\n", addr);
   uint64_t pAddr = this->toPhyAddr(addr, sup ? 8 : 1);
   return decoder_.read(data, pAddr, size);
 }
@@ -458,7 +457,7 @@ bool ACLManager::check(uint64_t addr, uint64_t size, int flags) const {
   while (it != acl_map_.end() && it->first < end) {
     if (it->second.end > addr) {
       if ((it->second.flags & flags) != flags) {
-        std::cout << "Memory access violation from 0x" << std::hex << addr << " to 0x" << end << ", curent flags=" << it->second.flags << ", access flags=" << flags << std::endl;
+        std::cout << "Memory access violation from 0x" << std::hex << addr << " to 0x" << end << ", current flags=" << it->second.flags << ", access flags=" << flags << std::endl;
         return false; // Overlapping entry is missing at least one required flag bit
       }
       addr = it->second.end; // Move to the end of the current matching range

@@ -148,6 +148,7 @@ public:
 
     int map_local_mem(uint64_t size, uint64_t *dev_maddr)
     {
+        std::cout << "map_local_mem size: " << size << std::endl;
         bool skip = false;
         if (*dev_maddr == 0x7FFFF000)
         {
@@ -178,6 +179,7 @@ public:
             if (!skip) {
                 if (!init_addr_set) {
                     virtual_allocator_.allocate(size, &vAddr);
+                    std::cout << "allocated vAddr: " << vAddr << std::endl;
                     vpn = vAddr >> 12;
                 }
                 std::cout << "allocated vpn: " << vpn << std::endl;
@@ -343,9 +345,6 @@ public:
         ram_.write((const uint8_t *)src, pAddr, size);
         ram_.enable_acl(true);
 
-        uint32_t v; 
-        ram_.read(&v, pAddr, sizeof(uint32_t));
-
         /*DBGPRINT("upload %ld bytes to 0x%lx\n", size, dest_addr);
         for (uint64_t i = 0; i < size && i < 1024; i += 4) {
             DBGPRINT("  0x%lx <- 0x%x\n", dest_addr + i, *(uint32_t*)((uint8_t*)src + i));
@@ -494,7 +493,7 @@ public:
 
         if (bit(pte_bytes, 0) && ((pte_bytes & 0xFFFFFFFF) != 0xbaadf00d))
         {
-            // If valid bit set, proceed to next level using new ppn form PTE.
+            // If valid bit set, proceed to next level using new ppn frm PTE.
             ppn_1 = (pte_bytes >> 10);
             std::cout << pte_bytes;
         }
@@ -593,6 +592,7 @@ public:
             if ((pte.v == 0) | ((pte.r == 0) & (pte.w == 1)))
             {
                 printf("Fault in vortex.cpp\n");
+                dump_page_table_mappings();
                 printf("Faulitng vAddr: %lx\n", vAddr_bits);
                 printf("Faulting ppn: %lx\n", pte.ppn[0]);
                 printf("Faulting ppn: %lx\n", pte.ppn[1]);
@@ -687,7 +687,7 @@ public:
                 i--;
                 // Need to allocate second level page table
                 if (pte.v == 0) {
-                    std::cout << "allocating unmapped pte" << std::endl;
+                    //std::cout << "allocating unmapped pte" << std::endl;
                     uint64_t ppn_1 = alloc_page_table();
                     pte_bytes = ((ppn_1 << 10) | 0b0000000001);
                     write_pte(pte_addr, pte_bytes);
@@ -708,9 +708,9 @@ public:
 
         pte_bytes = (pte_bytes >> 8) << 8; // shift off status flags
         pte_bytes |= (flag_mask & 0xff); // Set new flag values
-        std::cout << "old pte: " << std::hex << read_pte(pte_addr) << std::endl; 
+        //std::cout << "old pte: " << std::hex << read_pte(pte_addr) << std::endl; 
         write_pte(pte_addr, pte_bytes);
-        std::cout << "new pte: " << std::hex << read_pte(pte_addr) << std::endl; 
+        //std::cout << "new pte: " << std::hex << read_pte(pte_addr) << std::endl; 
         return 0;
     }
 
@@ -752,7 +752,7 @@ public:
             //(value >> ((i & 0x3) * 8)) & 0xff;
             src[i] = (value >> (i * 8)) & 0xff;
         }
-        std::cout << "pte write dest: " << addr << std::endl;
+        //std::cout << "pte write dest: " << addr << std::endl;
         ram_.enable_acl(false);
         ram_.write((const uint8_t *)src, addr, PTE_SIZE);
         ram_.enable_acl(true);
@@ -763,6 +763,12 @@ public:
         uint8_t *dest = new uint8_t[PTE_SIZE];
         ram_.read((uint8_t *)dest, addr, PTE_SIZE);
         return *(uint64_t *)((uint8_t *)dest);
+    }
+
+    void dump_page_table_mappings() {
+        for (auto i = addr_mapping.begin(); i != addr_mapping.end(); i++) {
+            std::cout << "virtual: " << std::hex << i->first << " to physical: " << std::hex << i->second << std::endl;
+        }
     }
 
 private:
@@ -935,9 +941,14 @@ extern int vx_mem_access(vx_buffer_h hbuffer, uint64_t offset, uint64_t size, in
     if ((offset + size) > buffer->size)
         return -1;
 
+    uint64_t virt_offset = buffer->addr % RAM_PAGE_SIZE;
+    uint64_t size_bits;
     DBGPRINT("MEM_ACCESS: hbuffer=%p, offset=%ld, size=%ld, flags=%d\n", hbuffer, offset, size, flags);
-    printf("Mem Address: %lx\n", buffer->addr);
-    return device->mem_access(buffer->addr + offset, size, flags);
+    printf("Mem Address: %lx with flags: %x\n", buffer->addr, flags);
+    std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr, &size_bits);
+    uint64_t pfn = ptw_access.first;
+    uint64_t phys_addr = (pfn << 12) + virt_offset;
+    return device->mem_access(phys_addr + offset, size, flags);
 }
 
 extern int vx_mem_address(vx_buffer_h hbuffer, uint64_t *address)
