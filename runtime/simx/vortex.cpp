@@ -149,7 +149,7 @@ public:
     int map_local_mem(uint64_t size, uint64_t *dev_maddr)
     {
         bool skip = false;
-        if (*dev_maddr == STARTUP_ADDR || *dev_maddr == 0x7FFFF000)
+        if (*dev_maddr == 0x7FFFF000)
         {
             skip = true;
         }
@@ -167,18 +167,20 @@ public:
         uint64_t init_vAddr;
         uint64_t vpn;
         bool init_addr_set = false;
+        uint64_t vAddr;
 
         // dev_maddr can be of size greater than a page, but we have to map and update
         // page tables on a page table granularity. So divide the allocation into pages.
-        for (ppn = (*dev_maddr) >> 12; ppn < ((*dev_maddr) >> 12) + (size / RAM_PAGE_SIZE) + 1; ppn++)
+        for (ppn = (*dev_maddr) >> 12; ppn < ((*dev_maddr) >> 12) + (size / RAM_PAGE_SIZE) + 1; ppn++, vpn++)
         {
             // Currently a 1-1 mapping is used, this can be changed here to support different
             // mapping schemes
             if (!skip) {
-                uint64_t vAddr;
-                virtual_allocator_.allocate((RAM_PAGE_SIZE), &vAddr);
-                std::cout << "allocated vpn: " << (vAddr >> 12) << std::endl;
-                vpn = vAddr >> 12;
+                if (!init_addr_set) {
+                    virtual_allocator_.allocate(size, &vAddr);
+                    vpn = vAddr >> 12;
+                }
+                std::cout << "allocated vpn: " << vpn << std::endl;
                 if (!init_addr_set) {
                     init_vAddr = vpn << 12;
                     init_addr_set = true;
@@ -531,8 +533,8 @@ public:
             std::cout << std::hex << " vpn0: " << vpn_0;
             write_pte(pte_addr, pte_bytes);
 
-            // If super paging is enabled.
-            if (SUPER_PAGING)
+            // If super paging is enabled. // Disable for now
+            if (false)
             {
                 // Check if this second level Page Table can be promoted to a super page. Brute force
                 // method is used to iterate over all PTE entries of the table and check if they have
@@ -1039,14 +1041,15 @@ extern int vx_start(vx_device_h hdevice, vx_buffer_h hkernel, vx_buffer_h hargum
     auto kernel = ((vx_buffer *)hkernel);
     auto arguments = ((vx_buffer *)harguments);
 
-    vx_stack_alloc(hdevice);
+    vx_stack_reserve(hdevice);
     return device->start(kernel->addr, arguments->addr);
 }
 
-extern int vx_stack_alloc(vx_device_h hdevice) {
+extern int vx_stack_reserve(vx_device_h hdevice) {
     std::cout << "stack allocation: " << std::endl;
     vx_buffer_h stack_buff = nullptr;
     uint32_t total_threads    = NUM_CORES * NUM_WARPS * NUM_THREADS;
+    std::cout << "total_threads: " << std::dec << total_threads << std::endl;
     uint64_t total_stack_size = STACK_SIZE * total_threads;
     uint64_t stack_end        = STACK_BASE_ADDR - total_stack_size;
     // Reserve Stack Pages

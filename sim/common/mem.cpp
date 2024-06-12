@@ -177,9 +177,6 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
   uint64_t pfn;
   uint64_t size_bits;
   // std::cout << "mem.cpp vAddr: " << addr << std::endl;
-  uint32_t total_threads    = NUM_CORES * NUM_WARPS * NUM_THREADS;
-  uint64_t total_stack_size = STACK_SIZE * total_threads;
-  uint64_t stack_end        = STACK_BASE_ADDR - total_stack_size;
   if (enableVM_) {
     // TODO: Add TLB support
     try {
@@ -216,14 +213,15 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
     int i = LEVELS - 1; 
 
     // std::cout << "vAddr: " << vAddr_bits << std::endl;
-
+    uint64_t page_table_base_addr;
     while(true)
     {
 
       //Read PTE.
       // std::cout << std::hex << "a: " << a << std::endl;
-      // std::cout << std::hex << "vAddr.vpn[i] * PTE_SIZE: " << vAddr.vpn[i] * PTE_SIZE << std::endl;
+      std::cout << std::hex << "vAddr.vpn[i] * PTE_SIZE: " << a + vAddr.vpn[i] * PTE_SIZE << std::endl;
       decoder_.read(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
+      page_table_base_addr = a + vAddr.vpn[i] * PTE_SIZE;
       PTE_SV64_t pte(pte_bytes);
       
       //Check if it has invalid flag bits.
@@ -269,15 +267,19 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
     // Check if page is absent and valid
     // TODO: fix
     if ((pte.a == 1) && (pte.v == 1)) {
-       // std::cout << "pte before: " << std::hex << pte_bytes << std::endl;
+        std::cout << "pte before: " << std::hex << pte_bytes << std::endl;
         uint64_t addr;
         CHECK_ERR((global_mem_->allocate(RAM_PAGE_SIZE, &addr)), {
             printf("%d\n", err);
         });
         uint64_t ppn = (addr >> 12) << 20;
-        pte_bytes = ppn | 0x07; // rwv
-        decoder_.write(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
-        //std::cout << "pte after: " << std::hex << pte_bytes << std::endl;
+        pte_bytes = ppn | 0x07; // add read write valid permission
+        uint64_t listen;
+        decoder_.write(&pte_bytes, page_table_base_addr, sizeof(uint64_t));
+        decoder_.read(&listen, page_table_base_addr, sizeof(uint64_t));
+        std::cout << "write: " << pte_bytes << " read: " << listen << std::endl;
+        std::cout << "writing to: " << page_table_base_addr << std::endl;
+        std::cout << "pte after: " << std::hex << pte_bytes << std::endl;
         PTE_SV64_t pte_new(pte_bytes);
         pte = pte_new;
         //std::cout << "pfn: " << pte.ppn[1] << std::endl;
