@@ -580,6 +580,7 @@ public:
         // Get base page table.
         uint64_t a = get_ptbr();
         int i = LEVELS - 1;
+        uint64_t page_table_base_addr;
 
         std::cout << std::hex << "page table walk for: " << vAddr_bits << std::endl;
         while (true)
@@ -588,6 +589,7 @@ public:
             //  HW: ram read from 1st layer page table
             std::cout << std::hex << "reading from address: " << a + vAddr.vpn[i] * PTE_SIZE << std::endl;
             ram_.read(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
+            page_table_base_addr = a + vAddr.vpn[i] * PTE_SIZE;
 
             // pte_bytes &= 0x00000000FFFFFFFF;
             PTE_SV64_t pte(pte_bytes);
@@ -629,6 +631,29 @@ public:
         }
 
         PTE_SV64_t pte(pte_bytes);
+
+        // Check if page is absent and valid
+        // allocate io buffer
+        if (vAddr_bits >= IO_BASE_ADDR && (pte.a == 1) && (pte.v == 1)) {
+            std::cout << "pte before: " << std::hex << pte_bytes << std::endl;
+            uint64_t addr;
+            CHECK_ERR((global_mem_.allocate(*size_bits, &addr)), { // using size_bits to pass in io buffer size
+                printf("%d\n", err);
+            });
+            uint64_t ppn = (addr >> 12) << 20;
+            pte_bytes = ppn | 0x07; // add read write valid permission
+            uint64_t listen;
+            ram_.write(&pte_bytes, page_table_base_addr, sizeof(uint64_t));
+            ram_.read(&listen, page_table_base_addr, sizeof(uint64_t));
+            std::cout << "write: " << pte_bytes << " read: " << listen << std::endl;
+            std::cout << "writing to: " << page_table_base_addr << std::endl;
+            std::cout << "pte after: " << std::hex << pte_bytes << std::endl;
+            PTE_SV64_t pte_new(pte_bytes);
+            pte = pte_new;
+            //std::cout << "pfn: " << pte.ppn[1] << std::endl;
+            //std::cout << "i: " << i << std::endl;
+            a = (pte_bytes >> 10 ) << 12;
+        }
 
         // Check RWX permissions according to access type.
         if (pte.r == 0)
@@ -887,6 +912,7 @@ extern int vx_mem_alloc(vx_device_h hdevice, uint64_t size, int flags, vx_buffer
 
 extern int vx_mem_reserve(vx_device_h hdevice, uint64_t address, uint64_t size, int flags, vx_buffer_h *hbuffer)
 {
+    flags |= VX_PAGE_VALID_ABSENT;
     if (nullptr == hdevice || nullptr == hbuffer || 0 == size)
         return -1;
 
@@ -1017,7 +1043,7 @@ extern int vx_copy_to_dev(vx_buffer_h hbuffer, const void *host_ptr, uint64_t ds
     if (!(buffer->addr + dst_offset == 0x7FFFF000))
     {
         uint64_t offset = buffer->addr % RAM_PAGE_SIZE;
-        uint64_t size_bits;
+        uint64_t size_bits = size;
         std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr + dst_offset, &size_bits);
         uint64_t pfn = ptw_access.first;
         uint64_t phys_addr = (pfn << 12) + offset;
