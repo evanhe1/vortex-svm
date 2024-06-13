@@ -149,6 +149,7 @@ public:
     int map_local_mem(uint64_t size, uint64_t *dev_maddr)
     {
         std::cout << "map_local_mem size: " << size << std::endl;
+        uint64_t size_bits;
         bool skip = false;
         if (*dev_maddr == 0x7FFFF000)
         {
@@ -204,7 +205,6 @@ public:
             }
         }
 
-        uint64_t size_bits;
         if (skip)
         {
             return 0;
@@ -261,6 +261,7 @@ public:
     int mem_alloc(uint64_t size, int flags, uint64_t *dev_addr)
     {
         uint64_t addr;
+        uint64_t size_bits;
         CHECK_ERR(global_mem_.allocate(size, &addr), {
             return err;
         });
@@ -340,7 +341,8 @@ public:
         {
             map_local_mem(asize, &dest_addr);
         }
-
+        std::cout << "addr write: " << pAddr << std::endl;
+        std::cout << "size: " << size << std::endl;
         ram_.enable_acl(false);
         ram_.write((const uint8_t *)src, pAddr, size);
         ram_.enable_acl(true);
@@ -504,7 +506,9 @@ public:
             // to indicate this is a pointer to the next level of the page table.
 
             // HW: pte not initialized here
+            
             ppn_1 = alloc_page_table();
+            std::cout << "allocating level 2 page table with address: " << std::hex << ppn_1 << std::endl;
             pte_bytes = ((ppn_1 << 10) | 0b0000000001);
             std::cout << "pte entry: " << std::hex << pte_bytes;
             std::cout << std::hex << " vpn1: " << vpn_1;
@@ -564,6 +568,7 @@ public:
         }
         std::cout << " --> " << std::endl
                   << "\t\t\t0x" << std::hex << pAddr << std::endl;
+        std::cout << std::hex << "written at address: " << pte_addr << std::endl;
     }
 
     std::pair<uint64_t, uint8_t> page_table_walk(uint64_t vAddr_bits, uint64_t *size_bits)
@@ -581,13 +586,12 @@ public:
         {
             // Read PTE.
             //  HW: ram read from 1st layer page table
-            std::cout << std::hex << "a: " << a << std::endl;
-            std::cout << std::hex << "vAddr.vpn[i] * PTE_SIZE: " << vAddr.vpn[i] * PTE_SIZE << std::endl;
+            std::cout << std::hex << "reading from address: " << a + vAddr.vpn[i] * PTE_SIZE << std::endl;
             ram_.read(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
 
             // pte_bytes &= 0x00000000FFFFFFFF;
             PTE_SV64_t pte(pte_bytes);
-
+            std::cout << std::hex << "pte bytes: " << pte_bytes << std::endl;
             // Check if it has invalid flag bits.
             if ((pte.v == 0) | ((pte.r == 0) & (pte.w == 1)))
             {
@@ -656,7 +660,6 @@ public:
             pfn = a >> 12;
         }
         std::cout << "translated vAddr 0x" << std::hex << vAddr_bits << " to pAddr 0x" << std::hex << pfn << "000" << std::endl;
-
         return std::make_pair(pfn, pte_bytes & 0xff);
     }
 
@@ -718,6 +721,7 @@ public:
     {
         uint64_t addr;
         global_mem_.allocate(RAM_PAGE_SIZE * 2, &addr);
+        virtual_allocator_.allocate(RAM_PAGE_SIZE * 2, &addr);
         init_page_table(addr);
         return addr;
     }
@@ -752,10 +756,10 @@ public:
             //(value >> ((i & 0x3) * 8)) & 0xff;
             src[i] = (value >> (i * 8)) & 0xff;
         }
-        //std::cout << "pte write dest: " << addr << std::endl;
         ram_.enable_acl(false);
         ram_.write((const uint8_t *)src, addr, PTE_SIZE);
         ram_.enable_acl(true);
+        
     }
 
     uint64_t read_pte(uint64_t addr)
@@ -769,6 +773,12 @@ public:
         for (auto i = addr_mapping.begin(); i != addr_mapping.end(); i++) {
             std::cout << "virtual: " << std::hex << i->first << " to physical: " << std::hex << i->second << std::endl;
         }
+    }
+    bool search_addr_mapping(uint64_t vpn) {
+        if (addr_mapping.find(vpn) != addr_mapping.end()) {
+            return true;
+        }
+        return false;
     }
 
 private:
