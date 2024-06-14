@@ -79,6 +79,12 @@ public:
 
         // Sets more
         set_processor_satp(VM_ADDR_MODE);
+
+        uint32_t total_threads    = NUM_CORES * NUM_WARPS * NUM_THREADS;
+        uint64_t total_stack_size = STACK_SIZE * total_threads;
+        uint64_t stack_end        = STACK_BASE_ADDR - total_stack_size;
+        // Reserve Stack Pages
+        mem_reserve(stack_end, total_stack_size, VX_PAGE_VALID_ABSENT);
     }
 
     ~vx_device()
@@ -992,20 +998,7 @@ extern int vx_start(vx_device_h hdevice, vx_buffer_h hkernel, vx_buffer_h hargum
     auto kernel = ((vx_buffer *)hkernel);
     auto arguments = ((vx_buffer *)harguments);
 
-    vx_stack_reserve(hdevice);
     return device->start(kernel->addr, arguments->addr);
-}
-
-extern int vx_stack_reserve(vx_device_h hdevice) {
-    vx_buffer_h stack_buff = nullptr;
-    uint32_t total_threads    = NUM_CORES * NUM_WARPS * NUM_THREADS;
-    uint64_t total_stack_size = STACK_SIZE * total_threads;
-    uint64_t stack_end        = STACK_BASE_ADDR - total_stack_size;
-    // Reserve Stack Pages
-    CHECK_ERR(vx_mem_reserve(hdevice, stack_end, total_stack_size, VX_PAGE_VALID_ABSENT, &stack_buff), {
-        return err;
-    });
-    return 0;
 }
 
 extern int vx_ready_wait(vx_device_h hdevice, uint64_t timeout)

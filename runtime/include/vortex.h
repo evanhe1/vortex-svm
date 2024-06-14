@@ -102,9 +102,6 @@ int vx_copy_from_dev(void* host_ptr, vx_buffer_h hbuffer, uint64_t src_offset, u
 // Start device execution
 int vx_start(vx_device_h hdevice, vx_buffer_h hkernel, vx_buffer_h harguments);
 
-// Reserve Stack
-int vx_stack_reserve(vx_device_h hdevice);
-
 // Wait for device ready with milliseconds timeout
 int vx_ready_wait(vx_device_h hdevice, uint64_t timeout);
 
