@@ -145,7 +145,6 @@ public:
 
     int map_local_mem(uint64_t size, uint64_t *dev_maddr)
     {
-        std::cout << "map_local_mem size: " << size << std::endl;
         uint64_t size_bits;
         bool skip = false;
         if (*dev_maddr == 0x7FFFF000)
@@ -161,8 +160,6 @@ public:
         uint64_t ppn = *dev_maddr >> 12; // 4 KB pages
         uint64_t init_pAddr = *dev_maddr;
 
-        // uint64_t init_vAddr = *dev_maddr + 0xf0000000; // vpn will change, but we want to return the vpn of the beginning of the virtual allocation
-        // init_vAddr = (init_vAddr >> 12) << 12;         // Shift off any page offset bits
         uint64_t init_vAddr;
         uint64_t vpn;
         bool init_addr_set = false;
@@ -177,11 +174,7 @@ public:
             if (!skip) {
                 if (!init_addr_set) {
                     virtual_allocator_.allocate(size, &vAddr);
-                    std::cout << "allocated vAddr: " << vAddr << std::endl;
                     vpn = vAddr >> 12;
-                }
-                std::cout << "allocated vpn: " << vpn << std::endl;
-                if (!init_addr_set) {
                     init_vAddr = vpn << 12;
                     init_addr_set = true;
                 }
@@ -189,13 +182,9 @@ public:
                 vpn = ppn;
             }
 
-            // vpn = skip ? ppn : ppn + 0xf0000;
-            // vpn = ppn;
-
             // If ppn to vpn mapping doesnt exist.
             if (addr_mapping.find(vpn) == addr_mapping.end())
             {
-                std::cout << "creating mapping vpn " << vpn << " to ppn " << ppn << std::endl;
                 // Create mapping.
                 update_page_table(ppn, vpn);
                 addr_mapping[vpn] = ppn;
@@ -212,49 +201,6 @@ public:
         return 0;
     }
 
-    // For when virutal address is known and need to reverse physical mapping
-    int map_virtual_physical(uint64_t size, uint64_t *virt_addr)
-    {
-        bool skip = false;
-        if (*virt_addr == STARTUP_ADDR || *virt_addr == 0x7FFFF000)
-        {
-            skip = true;
-        }
-
-        uint64_t vpn = *virt_addr >> 12; // 4 KB pages
-        uint64_t init_vAddr = *virt_addr;
-        uint64_t init_pAddr = *virt_addr - 0xf0000000; // vpn will change, but we want to return the vpn of the beginning of the virtual allocation
-        init_pAddr = (init_pAddr >> 12) << 12;         // Shift off any page offset bits
-        uint64_t ppn;
-
-        // virt_addr can be of size greater than a page, but we have to map and update
-        // page tables on a page table granularity. So divide the allocation into pages.
-        for (vpn = (*virt_addr) >> 12; vpn < ((*virt_addr) >> 12) + (size / RAM_PAGE_SIZE) + 1; vpn++)
-        {
-            // Currently a 1-1 mapping is used, this can be changed here to support different
-            // mapping schemes
-            ppn = skip ? vpn : vpn - 0xf0000;
-            // vpn = ppn;
-
-            // If ppn to vpn mapping doesnt exist.
-            if (addr_mapping.find(vpn) == addr_mapping.end())
-            {
-                // Create mapping.
-                update_page_table(ppn, vpn);
-                addr_mapping[vpn] = ppn;
-            }
-        }
-
-        uint64_t size_bits;
-        if (skip)
-        {
-            return 0;
-        }
-        *virt_addr = init_pAddr; // commit vpn to be returned to host
-
-        return 0;
-    }
-
     int mem_alloc(uint64_t size, int flags, uint64_t *dev_addr)
     {
         uint64_t addr;
@@ -262,17 +208,11 @@ public:
         CHECK_ERR(global_mem_.allocate(size, &addr), {
             return err;
         });
-        printf("physical: %x\n", addr);
         uint64_t offset = addr % RAM_PAGE_SIZE;
         uint64_t phys_addr = addr;
         CHECK_ERR(map_local_mem(size, &addr), {
             return err;
         });
-        printf("virtual: %x\n", addr);
-        printf("Page Offset: %x\n", offset);
-        printf("Size: %d\n", size);
-        std::cout << "mem alloc flags: " << flags << std::endl;
-        std::cout << "mem alloc size: " << size << std::endl;
         CHECK_ERR(this->mem_access(phys_addr, size, flags), {
             global_mem_.release(phys_addr);
             return err;
@@ -283,12 +223,10 @@ public:
 
     int mem_reserve(uint64_t dev_addr, uint64_t size, int flags)
     {
-        std::cout << std::hex << "address: " << dev_addr << " size: " << size <<  std::endl;
         CHECK_ERR(virtual_allocator_.reserve(dev_addr, size), {
             return err;
         });
         for (uint64_t vpn = dev_addr >> 12; vpn < (dev_addr >> 12) + (size / RAM_PAGE_SIZE) + 1; vpn++) {
-            std::cout << "setting flags for vpn: " << std::hex << vpn << std::endl;
             CHECK_ERR(this->set_pte_flag((vpn << 12) | 0x000, flags), {
                 virtual_allocator_.release(vpn);
                 return err;
@@ -299,13 +237,11 @@ public:
 
     int mem_free(uint64_t dev_addr)
     {
-        printf("freeing: %lx\n", dev_addr);
         return global_mem_.release(dev_addr);
     }
 
     int mem_access(uint64_t dev_addr, uint64_t size, int flags)
     {
-        std::cout << "mem_access setting addr: " << dev_addr << std::endl;
         uint64_t asize = aligned_size(size, CACHE_BLOCK_SIZE);
         if (dev_addr + asize > GLOBAL_MEM_SIZE)
             return -1;
@@ -338,8 +274,6 @@ public:
         {
             map_local_mem(asize, &dest_addr);
         }
-        std::cout << "addr write: " << pAddr << std::endl;
-        std::cout << "size: " << size << std::endl;
         ram_.enable_acl(false);
         ram_.write((const uint8_t *)src, pAddr, size);
         ram_.enable_acl(true);
@@ -377,12 +311,7 @@ public:
         {
             future_.wait();
         }
-        for (auto i = addr_mapping.begin(); i != addr_mapping.end(); i++)
-        {
-            std::cout << "virtual: " << std::hex << i->first << " to physical: " << std::hex << i->second << std::endl;
-        }
         // set kernel info
-        // TODO: new DCR for SATP
         this->dcr_write(VX_DCR_BASE_STARTUP_ADDR0, krnl_addr & 0xffffffff);
         this->dcr_write(VX_DCR_BASE_STARTUP_ADDR1, krnl_addr >> 32);
         this->dcr_write(VX_DCR_BASE_STARTUP_ARG0, args_addr & 0xffffffff);
@@ -565,7 +494,6 @@ public:
         }
         std::cout << " --> " << std::endl
                   << "\t\t\t0x" << std::hex << pAddr << std::endl;
-        std::cout << std::hex << "written at address: " << pte_addr << std::endl;
     }
 
     std::pair<uint64_t, uint8_t> page_table_walk(uint64_t vAddr_bits, uint64_t *size_bits)
@@ -579,18 +507,15 @@ public:
         int i = LEVELS - 1;
         uint64_t page_table_base_addr;
 
-        std::cout << std::hex << "page table walk for: " << vAddr_bits << std::endl;
         while (true)
         {
             // Read PTE.
             //  HW: ram read from 1st layer page table
-            std::cout << std::hex << "reading from address: " << a + vAddr.vpn[i] * PTE_SIZE << std::endl;
             ram_.read(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
             page_table_base_addr = a + vAddr.vpn[i] * PTE_SIZE;
 
             // pte_bytes &= 0x00000000FFFFFFFF;
             PTE_SV64_t pte(pte_bytes);
-            std::cout << std::hex << "pte bytes: " << pte_bytes << std::endl;
             // Check if it has invalid flag bits.
             if ((pte.v == 0) | ((pte.r == 0) & (pte.w == 1)))
             {
@@ -632,7 +557,6 @@ public:
         // Check if page is absent and valid
         // allocate io buffer
         if (vAddr_bits >= IO_BASE_ADDR && (pte.a == 1) && (pte.v == 1)) {
-            std::cout << "pte before: " << std::hex << pte_bytes << std::endl;
             uint64_t addr;
             CHECK_ERR((global_mem_.allocate(*size_bits, &addr)), { // using size_bits to pass in io buffer size
                 printf("%d\n", err);
@@ -641,14 +565,8 @@ public:
             pte_bytes = ppn | 0x07; // add read write valid permission
             uint64_t listen;
             ram_.write(&pte_bytes, page_table_base_addr, sizeof(uint64_t));
-            ram_.read(&listen, page_table_base_addr, sizeof(uint64_t));
-            std::cout << "write: " << pte_bytes << " read: " << listen << std::endl;
-            std::cout << "writing to: " << page_table_base_addr << std::endl;
-            std::cout << "pte after: " << std::hex << pte_bytes << std::endl;
             PTE_SV64_t pte_new(pte_bytes);
             pte = pte_new;
-            //std::cout << "pfn: " << pte.ppn[1] << std::endl;
-            //std::cout << "i: " << i << std::endl;
             a = (pte_bytes >> 10 ) << 12;
         }
 
@@ -681,7 +599,6 @@ public:
             *size_bits = 12;
             pfn = a >> 12;
         }
-        // std::cout << "translated vAddr 0x" << std::hex << vAddr_bits << " to pAddr 0x" << std::hex << pfn << "000" << std::endl;
         return std::make_pair(pfn, pte_bytes & 0xff);
     }
 
@@ -712,7 +629,6 @@ public:
                 i--;
                 // Need to allocate second level page table
                 if (pte.v == 0) {
-                    //std::cout << "allocating unmapped pte" << std::endl;
                     uint64_t ppn_1 = alloc_page_table();
                     pte_bytes = ((ppn_1 << 10) | 0b0000000001);
                     write_pte(pte_addr, pte_bytes);
@@ -733,9 +649,7 @@ public:
 
         pte_bytes = (pte_bytes >> 8) << 8; // shift off status flags
         pte_bytes |= (flag_mask & 0xff); // Set new flag values
-        //std::cout << "old pte: " << std::hex << read_pte(pte_addr) << std::endl; 
         write_pte(pte_addr, pte_bytes);
-        //std::cout << "new pte: " << std::hex << read_pte(pte_addr) << std::endl; 
         return 0;
     }
 
@@ -903,7 +817,6 @@ extern int vx_mem_alloc(vx_device_h hdevice, uint64_t size, int flags, vx_buffer
     DBGPRINT("MEM_ALLOC: hdevice=%p, size=%ld, flags=0x%d, hbuffer=%p\n", hdevice, size, flags, (void *)buffer);
 
     *hbuffer = buffer;
-    std::cout << "address: " << std::hex << buffer->addr << std::endl;
     return 0;
 }
 
@@ -943,13 +856,10 @@ extern int vx_mem_free(vx_buffer_h hbuffer)
     auto buffer = ((vx_buffer *)hbuffer);
     auto device = ((vx_device *)buffer->device);
 
-    std::cout << "addr: " << buffer->addr << std::endl;
 
     uint64_t offset = buffer->addr % RAM_PAGE_SIZE;
     uint64_t size_bits;
-    printf("pre walk\n");
     std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr, &size_bits);
-    printf("post walk\n");
     uint64_t pfn = ptw_access.first;
     buffer->addr = (pfn << 12) + offset;
 
@@ -977,7 +887,6 @@ extern int vx_mem_access(vx_buffer_h hbuffer, uint64_t offset, uint64_t size, in
     uint64_t virt_offset = buffer->addr % RAM_PAGE_SIZE;
     uint64_t size_bits;
     DBGPRINT("MEM_ACCESS: hbuffer=%p, offset=%ld, size=%ld, flags=%d\n", hbuffer, offset, size, flags);
-    printf("Mem Address: %lx with flags: %x\n", buffer->addr, flags);
     std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr, &size_bits);
     uint64_t pfn = ptw_access.first;
     uint64_t phys_addr = (pfn << 12) + virt_offset;
@@ -1065,12 +974,10 @@ extern int vx_copy_from_dev(void *host_ptr, vx_buffer_h hbuffer, uint64_t src_of
 
     DBGPRINT("COPY_FROM_DEV: hbuffer=%p, host_addr=%p, src_offset=%ld, size=%ld\n", hbuffer, host_ptr, src_offset, size);
 
-    std::cout << "copy from virtual " << buffer->addr << std::endl;
     uint64_t offset = buffer->addr % RAM_PAGE_SIZE;
     uint64_t size_bits;
     std::pair<uint64_t, uint8_t> ptw_access = device->page_table_walk(buffer->addr + src_offset, &size_bits);
     uint64_t pfn = ptw_access.first;
-    std::cout << "copy from physical " << (pfn << 12) + offset << std::endl;
     return device->download(host_ptr, (pfn << 12) + offset, size);
 }
 
@@ -1090,10 +997,8 @@ extern int vx_start(vx_device_h hdevice, vx_buffer_h hkernel, vx_buffer_h hargum
 }
 
 extern int vx_stack_reserve(vx_device_h hdevice) {
-    std::cout << "stack allocation: " << std::endl;
     vx_buffer_h stack_buff = nullptr;
     uint32_t total_threads    = NUM_CORES * NUM_WARPS * NUM_THREADS;
-    std::cout << "total_threads: " << std::dec << total_threads << std::endl;
     uint64_t total_stack_size = STACK_SIZE * total_threads;
     uint64_t stack_end        = STACK_BASE_ADDR - total_stack_size;
     // Reserve Stack Pages

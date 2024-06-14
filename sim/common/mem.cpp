@@ -161,13 +161,11 @@ MemoryUnit::TLBEntry MemoryUnit::tlbLookup(uint64_t vAddr, uint32_t flagMask) {
         }
       }
       iter->second.mru = true;
-      // std::cout << "TLB hit on vAddr " << vAddr << std::endl;
       return iter->second;
     } else {
      throw PageFault(vAddr, false); // protection fault
     }
   } else {
-    // std::cout << "TLB miss on vAddr " << vAddr << std::endl;
     throw PageFault(vAddr, true); // TLB miss
   }
 }
@@ -176,19 +174,15 @@ uint64_t MemoryUnit::toPhyAddr(uint64_t addr, uint32_t flagMask) {
   uint64_t pAddr;
   uint64_t pfn;
   uint64_t size_bits;
-  // std::cout << "mem.cpp vAddr: " << addr << std::endl;
   if (enableVM_) {
-    // TODO: Add TLB support
     try {
       TLBEntry t = this->tlbLookup(addr, flagMask);
       pfn = t.pfn;
       size_bits = t.page_size;
-      //std::cout << "hit pfn: " << pfn << std::endl;
     } catch (PageFault e) {
       if (e.notFound == true) {
         std::pair<uint64_t, uint8_t> ptw_access = page_table_walk(addr, &size_bits);
         pfn = ptw_access.first;
-        std::cout << "miss pfn " << pfn << std::endl;
         tlbAdd(addr, pfn << size_bits, flagMask, size_bits);
       } else {
         throw e;
@@ -218,8 +212,6 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
     {
 
       //Read PTE.
-      // std::cout << std::hex << "a: " << a << std::endl;
-      std::cout << std::hex << "vAddr.vpn[i] * PTE_SIZE: " << a + vAddr.vpn[i] * PTE_SIZE << std::endl;
       decoder_.read(&pte_bytes, a + vAddr.vpn[i] * PTE_SIZE, sizeof(uint64_t));
       page_table_base_addr = a + vAddr.vpn[i] * PTE_SIZE;
       PTE_SV64_t pte(pte_bytes);
@@ -228,15 +220,6 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
       
       if ( (pte.v == 0) | ( (pte.r == 0) & (pte.w == 1) ) )
       {
-        printf("ptbr on fault: %lx\n", ptbr);
-        printf("Fault in mem.cpp\n");
-        printf("Stack Base Addr: %lx\n", STACK_BASE_ADDR - RAM_PAGE_SIZE * 2);
-        printf("Faulitng vAddr: %lx\n", vAddr_bits);
-        printf("vpn level 1: %lx\n", vAddr.vpn[1]);
-        printf("vpn level 0: %lx\n", vAddr.vpn[0]);
-        printf("Faulting vpn: %lx\n", vAddr.vpn[i]);
-        printf("Faulting ppn: %lx\n", pte.ppn[i]);
-        printf("Faulting ppn flags: %x\n", pte.flags);
         throw Page_Fault_Exception("Page Fault : Attempted to access invalid entry.");
       }
 
@@ -267,7 +250,6 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
     // Check if page is absent and valid
     // TODO: fix
     if ((pte.a == 1) && (pte.v == 1)) {
-        std::cout << "pte before: " << std::hex << pte_bytes << std::endl;
         uint64_t addr;
         CHECK_ERR((global_mem_->allocate(RAM_PAGE_SIZE, &addr)), {
             printf("%d\n", err);
@@ -277,13 +259,8 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
         uint64_t listen;
         decoder_.write(&pte_bytes, page_table_base_addr, sizeof(uint64_t));
         decoder_.read(&listen, page_table_base_addr, sizeof(uint64_t));
-        std::cout << "write: " << pte_bytes << " read: " << listen << std::endl;
-        std::cout << "writing to: " << page_table_base_addr << std::endl;
-        std::cout << "pte after: " << std::hex << pte_bytes << std::endl;
         PTE_SV64_t pte_new(pte_bytes);
         pte = pte_new;
-        //std::cout << "pfn: " << pte.ppn[1] << std::endl;
-        //std::cout << "i: " << i << std::endl;
         a = (pte_bytes >> 10 ) << 12;
     }
     // TODO: Clarify
@@ -324,7 +301,6 @@ std::pair<uint64_t, uint8_t> MemoryUnit::page_table_walk(uint64_t vAddr_bits, ui
       *size_bits = 12;
       pfn = a >> 12;
     }
-    std::cout << "translated vAddr 0x" << std::hex << vAddr_bits << " to pAddr 0x" << std::hex << pfn << "000" << std::endl;
     return std::make_pair(pfn, pte_bytes & 0xff);
 }
  
@@ -531,7 +507,6 @@ uint8_t *RAM::get(uint64_t address) const {
 
 void RAM::read(void* data, uint64_t addr, uint64_t size) {
   if (check_acl_ && acl_mngr_.check(addr, size, 0x1) == false) {
-    std::cout << "RAM::read failed" << std::endl; 
     throw BadAddress();
   }
   uint8_t* d = (uint8_t*)data;
@@ -542,7 +517,6 @@ void RAM::read(void* data, uint64_t addr, uint64_t size) {
 
 void RAM::write(const void* data, uint64_t addr, uint64_t size) {
   if (check_acl_ && acl_mngr_.check(addr, size, 0x2) == false) {
-    std::cout << "RAM::write failed" << std::endl; 
     throw BadAddress();
   }
   const uint8_t* d = (const uint8_t*)data;

@@ -164,11 +164,6 @@ extern int vx_upload_kernel_bytes(vx_device_h hdevice, const void* content, uint
   auto bin_size = size - 16;
   auto runtime_size = (max_vma - min_vma);
 
-  printf("min_vma: %lx\n", min_vma);
-  printf("max_vma: %lx\n", max_vma);
-  printf("bin_size: %lx\n", bin_size);
-  printf("runtime_size: %lx\n", runtime_size);
-
   vx_buffer_h _hbuffer;
 #ifndef NDEBUG
   /*RT_CHECK(vx_mem_reserve(hdevice, STARTUP_ADDR, runtime_size, 0, &_hbuffer), {
