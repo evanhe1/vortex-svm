@@ -79,9 +79,6 @@ public:
 
         // Sets more
         set_processor_satp(VM_ADDR_MODE);
-
-        // reservation to avoid tlb collision with amo_reservation entry
-        virtual_allocator_.reserve(ALLOC_BASE_ADDR, 3 * RAM_PAGE_SIZE);
     }
 
     ~vx_device()
@@ -684,7 +681,7 @@ public:
             *size_bits = 12;
             pfn = a >> 12;
         }
-        std::cout << "translated vAddr 0x" << std::hex << vAddr_bits << " to pAddr 0x" << std::hex << pfn << "000" << std::endl;
+        // std::cout << "translated vAddr 0x" << std::hex << vAddr_bits << " to pAddr 0x" << std::hex << pfn << "000" << std::endl;
         return std::make_pair(pfn, pte_bytes & 0xff);
     }
 
